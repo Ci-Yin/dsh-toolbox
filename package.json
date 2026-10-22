@@ -1,0 +1,55 @@
+{
+  "name": "dsh-toolbox",
+  "version": "0.1.0",
+  "description": "Model selector search, persistent custom groups, and request-identity (User-Agent) rewrite for DeepSeek Harness Web GUI.",
+  "type": "module",
+  "main": "./index.js",
+  "client": "./client.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./src/*": "./src/*"
+  },
+  "files": [
+    "cordis.patch.yml",
+    "index.js",
+    "client.js",
+    "icon.svg",
+    "locale",
+    "src",
+    "scripts",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "node scripts/build-client.mjs",
+    "test": "node --test test/model-catalog.test.js test/model-groups.test.js test/model-storage.test.js test/model-selector.test.js test/settings-panel.test.js test/settings-interaction.test.js test/settings-tabs.test.js test/identity-core.test.js test/identity-patch.test.js test/identity-host.test.js test/identity-client.test.js test/identity-entry.test.js test/client-bundle.test.js",
+    "check": "node scripts/build-client.mjs --check && node --check scripts/build-client.mjs index.js client.js src/identity-core.js src/identity-client.js src/identity-host.js src/identity-patch.js src/model-catalog.js src/model-groups.js src/model-storage.js src/model-selector.js src/settings-panel.js src/styles.js src/i18n.js src/features.js test/helpers.js test/model-catalog.test.js test/model-groups.test.js test/model-storage.test.js test/model-selector.test.js test/settings-panel.test.js test/settings-interaction.test.js test/settings-tabs.test.js test/identity-core.test.js test/identity-patch.test.js test/identity-host.test.js test/identity-client.test.js test/identity-entry.test.js test/client-bundle.test.js"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-client-ui-settings-plugins",
+        "@deepseek-ai/dsh-client-locale"
+      ]
+    }
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@deepseek-ai/schemastery": "3.18.5"
+  },
+  "devDependencies": {
+    "jsdom": "26.1.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  }
+}
