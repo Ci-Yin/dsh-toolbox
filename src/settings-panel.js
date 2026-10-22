@@ -38,7 +38,8 @@ export const SETTINGS_TAB_KEY = 'dsh-toolbox:settings-tab:v1'
 /** Read the remembered sub-page; anything unexpected falls back to groups. */
 export function readSettingsTab(storage) {
   try {
-    return storage?.getItem?.(SETTINGS_TAB_KEY) === 'identity' ? 'identity' : 'groups'
+    const value = storage?.getItem?.(SETTINGS_TAB_KEY)
+    return value === 'identity' || value === 'activity' ? value : 'groups'
   } catch {
     return 'groups'
   }
@@ -47,7 +48,10 @@ export function readSettingsTab(storage) {
 /** Remember the sub-page (best effort; storage may be unavailable). */
 export function writeSettingsTab(storage, tab) {
   try {
-    storage?.setItem?.(SETTINGS_TAB_KEY, tab === 'identity' ? 'identity' : 'groups')
+    storage?.setItem?.(
+      SETTINGS_TAB_KEY,
+      tab === 'identity' || tab === 'activity' ? tab : 'groups',
+    )
   } catch {
     // Losing the preference is harmless.
   }
@@ -232,6 +236,11 @@ export function createSettingsPanel(React) {
       persistConfig((prev) => ({ ...prev, preserveProviderGroups: checked }))
     }
 
+    const handleToggleActivityView = (e) => {
+      const checked = e.target.checked
+      persistConfig((prev) => ({ ...prev, activityViewEnabled: checked }))
+    }
+
     const handleExport = () => {
       const json = exportConfig(config)
       setImportText(json)
@@ -408,6 +417,19 @@ export function createSettingsPanel(React) {
             onClick: () => setActiveTab('identity'),
           },
           t('settings.tabs.identity'),
+        ),
+        h(
+          'button',
+          {
+            type: 'button',
+            role: 'tab',
+            className: 'dsh-toolbox-settings-tab',
+            'data-tab': 'activity',
+            'data-active': activeTab === 'activity' ? 'true' : 'false',
+            'aria-selected': activeTab === 'activity' ? 'true' : 'false',
+            onClick: () => setActiveTab('activity'),
+          },
+          t('settings.tabs.activity'),
         ),
       ),
 
@@ -861,6 +883,39 @@ export function createSettingsPanel(React) {
         'div',
         { className: 'dsh-toolbox-settings-page', 'data-page': 'identity' },
         h(IdentitySection, { key: 'identity', t, win }),
+      ),
+
+      // Page: optional sidebar activity view
+      h(
+        'div',
+        { className: 'dsh-toolbox-settings-page', 'data-page': 'activity' },
+        h(
+          'div',
+          { className: 'dsh-toolbox-card' },
+          h(
+            'div',
+            { className: 'dsh-toolbox-card-head' },
+            h('h3', { className: 'dsh-toolbox-card-title' }, t('activity.settings.title')),
+          ),
+          h('p', { className: 'dsh-toolbox-muted' }, t('activity.settings.description')),
+          h(
+            'div',
+            { className: 'dsh-toolbox-pref' },
+            h(
+              'div',
+              { className: 'dsh-toolbox-pref-copy' },
+              h('div', { className: 'dsh-toolbox-pref-title' }, t('activity.settings.enable')),
+              h('div', { className: 'dsh-toolbox-pref-hint' }, t('activity.settings.hint')),
+            ),
+            h('input', {
+              type: 'checkbox',
+              className: 'dsh-toolbox-switch',
+              checked: config.activityViewEnabled === true,
+              'aria-label': t('activity.settings.enable'),
+              onChange: handleToggleActivityView,
+            }),
+          ),
+        ),
       ),
     )
   }

@@ -50,6 +50,7 @@ test('fresh config is complete and independent on every call', () => {
   assert.equal(first.groups.length, 1)
   assert.equal(first.showUngrouped, true)
   assert.equal(first.preserveProviderGroups, false)
+  assert.equal(first.activityViewEnabled, false)
   first.groups[0].name = 'mutated'
   assert.notEqual(second.groups[0].name, 'mutated')
   assert.deepEqual(validateConfig(second), second)
@@ -65,6 +66,18 @@ test('save/load round-trips and returns defaults when storage is empty', () => {
   assert.equal(JSON.parse(storage.getItem(STORAGE_KEY)).version, 1)
 })
 
+test('activity view opt-in survives save and rejects invalid values', () => {
+  const storage = new FakeStorage()
+  const config = createDefaultConfig()
+  config.activityViewEnabled = true
+  saveConfig(storage, config)
+  assert.equal(loadConfig(storage).activityViewEnabled, true)
+  assert.throws(
+    () => normalizeConfig({ ...config, activityViewEnabled: 'true' }),
+    (error) => error.code === 'invalid-type' && error.path === 'activityViewEnabled',
+  )
+})
+
 test('version 0 groups[].models migrates to modelKeys', () => {
   const legacy = {
     version: 0,
@@ -78,6 +91,7 @@ test('version 0 groups[].models migrates to modelKeys', () => {
   assert.deepEqual(normalized.groups[0].modelKeys, ['p/m'])
   assert.equal(normalized.groups[1].order, 1)
   assert.equal(normalized.showUngrouped, true)
+  assert.equal(normalized.activityViewEnabled, false)
 })
 
 test('invalid JSON and unknown top-level/nested fields are rejected', () => {

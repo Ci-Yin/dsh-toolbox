@@ -12,6 +12,29 @@ import { JSDOM } from 'jsdom'
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true
 
+test('activity setting defaults off and toggles without changing model groups', async () => {
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', { url: 'http://localhost/' })
+  globalThis.window = dom.window
+  globalThis.document = dom.window.document
+  const storage = new FakeStorage()
+  const root = createRoot(dom.window.document.getElementById('root'))
+  await act(async () => root.render(React.createElement(createSettingsPanel(React), {
+    t: createTranslator('zh'), storage, window: dom.window,
+  })))
+  const tab = dom.window.document.querySelector('[data-tab="activity"]')
+  await act(async () => tab.click())
+  const checkbox = dom.window.document.querySelector('[data-page="activity"] input[type="checkbox"]')
+  assert.ok(checkbox)
+  assert.equal(checkbox.checked, false)
+  await act(async () => checkbox.click())
+  assert.equal(loadConfig(storage).activityViewEnabled, true)
+  assert.equal(loadConfig(storage).groups.length, 1)
+  await act(async () => checkbox.click())
+  assert.equal(loadConfig(storage).activityViewEnabled, false)
+  await act(async () => root.unmount())
+  dom.window.close()
+})
+
 test('settings interactions create a group and assign a model', async () => {
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', {
     url: 'http://localhost/',

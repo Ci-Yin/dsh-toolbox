@@ -8,6 +8,8 @@
 
 import { createModelSelectorController } from './model-selector.js'
 import { createSettingsPanel } from './settings-panel.js'
+import { ActivitySidebar } from './activity-sidebar.js'
+import { loadConfig, saveConfig, subscribeConfig } from './model-storage.js'
 import { NS, en, zh } from './i18n.js'
 
 /**
@@ -78,7 +80,7 @@ export const modelGroupsFeature = {
   settingsTab: 'dsh-toolbox',
   configSchema: {
     version: 1,
-    keys: ['version', 'mode', 'groups', 'showUngrouped', 'preserveProviderGroups'],
+    keys: ['version', 'mode', 'groups', 'showUngrouped', 'preserveProviderGroups', 'activityViewEnabled'],
   },
 
   apply(ctx, helpers) {
@@ -98,17 +100,23 @@ export const modelGroupsFeature = {
     helpers.controller = controller
     if (doc) controller.start()
 
-    let slotDisposer = null
+    let settingsSlotDisposer = null
+    let activityInjectionDisposer = null
+    let activityToggleDisposer = null
+    let activityEnabled = false
+    let activityMode = false
+    const modeListeners = new Set()
+
     if (helpers.React && ctx.slots?.inject) {
       const SettingsView = createSettingsPanel(helpers.React)
-      const Component = (props) =>
+      const SettingsComponent = (props) =>
         helpers.React.createElement(SettingsView, {
           ...props,
           t,
           storage,
           window: win,
         })
-      slotDisposer = ctx.slots.inject('settings.plugins.tab', () =>
+      settingsSlotDisposer = ctx.slots.inject('settings.plugins.tab', () =>
         ctx.slots.register(
           {
             name: 'settings.plugins.tab',
@@ -117,16 +125,93 @@ export const modelGroupsFeature = {
             label: () => t('settings.tab'),
             locale: NS,
           },
-          Component,
+          SettingsComponent,
         ),
       )
+
+      const ActivityComponent = (props) =>
+        helpers.React.createElement(ActivitySidebar, {
+          ...props,
+          React: helpers.React,
+          t,
+        })
+      const setActivityMode = (active) => {
+        if (activityMode === active) return
+        activityMode = active
+        for (const listener of modeListeners) listener()
+        if (typeof activityInjectionDisposer === 'function') {
+          activityInjectionDisposer()
+          activityInjectionDisposer = null
+        }
+        if (!activityEnabled || !activityMode) return
+        activityInjectionDisposer = ctx.slots.inject('sidebar.workspaces', () => {
+          const uiWorkspace = ctx.get?.('uiWorkspace')
+          if (!uiWorkspace?.openSession || !uiWorkspace?.startSession) return () => {}
+          return ctx.slots.register(
+            {
+              name: 'sidebar.workspaces',
+              id: 'dsh-toolbox-activity',
+              priority: -10,
+              label: () => t('activity.view.activity'),
+              locale: NS,
+              inject: () => ({ uiWorkspace, restoreNativeSidebar: () => setActivityMode(false) }),
+            },
+            ActivityComponent,
+          )
+        })
+      }
+      function ToggleComponent(props) {
+        const active = helpers.React.useSyncExternalStore(
+          (listener) => { modeListeners.add(listener); return () => modeListeners.delete(listener) },
+          () => activityMode,
+          () => false,
+        )
+        const label = t(active ? 'activity.toggle.workspace' : 'activity.toggle.activity')
+        return helpers.React.createElement(
+          'button',
+          {
+            type: 'button',
+            className: 'dsh-toolbox-activity-toggle',
+            'aria-label': label,
+            title: label,
+            'aria-pressed': active,
+            onClick: () => setActivityMode(!active),
+          },
+          helpers.React.createElement('span', { 'aria-hidden': 'true' }, active ? '▤' : '◷'),
+          props.wide ? helpers.React.createElement('span', null, t(active ? 'activity.view.workspace' : 'activity.view.activity')) : null,
+        )
+      }
+      const setActivityRegistration = (enabled) => {
+        const nextEnabled = enabled === true
+        if (nextEnabled === activityEnabled) return
+        activityEnabled = nextEnabled
+        if (!activityEnabled) setActivityMode(false)
+        if (typeof activityToggleDisposer === 'function') {
+          activityToggleDisposer()
+          activityToggleDisposer = null
+        }
+        if (!activityEnabled) return
+        const uiWorkspace = ctx.get?.('uiWorkspace')
+        if (!uiWorkspace?.openSession || !uiWorkspace?.startSession) return
+        activityToggleDisposer = ctx.slots.inject('sidebar.footer.action', () =>
+          ctx.slots.register(
+            { name: 'sidebar.footer.action', id: 'dsh-toolbox-activity-toggle', order: 20, label: () => t('activity.toggle.activity'), locale: NS },
+            ToggleComponent,
+          ),
+        )
+      }
+      setActivityRegistration(loadConfig(storage).activityViewEnabled)
+      const offConfig = subscribeConfig(win, () => setActivityRegistration(loadConfig(storage).activityViewEnabled))
+      ctx.effect(() => () => offConfig(), 'dsh-toolbox: activity config subscription')
     }
 
     return () => {
-      try {
-        if (typeof slotDisposer === 'function') slotDisposer()
-      } catch {
-        // The slot owner may already be disposed during page teardown.
+      for (const disposer of [settingsSlotDisposer, activityInjectionDisposer, activityToggleDisposer]) {
+        try {
+          if (typeof disposer === 'function') disposer()
+        } catch {
+          // The slot owner may already be disposed during page teardown.
+        }
       }
       controller.stop()
     }

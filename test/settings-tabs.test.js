@@ -30,15 +30,19 @@ function identitySnapshot() {
   }
 }
 
-test('the settings page renders two sub-page tabs and both page containers', () => {
+test('the settings page renders three sub-page tabs and page containers', () => {
   const Panel = createSettingsPanel(React)
   const html = renderToStaticMarkup(React.createElement(Panel, { t, storage: fixtureStorage() }))
   assert.match(html, /role="tablist"/u)
   assert.match(html, /data-tab="groups"/u)
   assert.match(html, /data-page="groups"/u)
   assert.match(html, /data-page="identity"/u)
+  assert.match(html, /data-page="activity"/u)
+  assert.match(html, /启用活动视图/u)
   assert.match(html, /aria-selected="true">模型分组/u)
   assert.match(html, /aria-selected="false">请求身份改写/u)
+  assert.match(html, /data-tab="activity"/u)
+  assert.match(html, /aria-selected="false">活动视图/u)
   // Groups content belongs to its own page, the identity card to the other.
   const groupsPage = html.slice(html.indexOf('data-page="groups"'), html.indexOf('data-page="identity"'))
   const identityPage = html.slice(html.indexOf('data-page="identity"'))
@@ -67,7 +71,7 @@ test('clicking the identity tab switches the page and remembers the choice', asy
   const tabs = [...dom.window.document.querySelectorAll('.dsh-toolbox-settings-tab')]
   assert.deepEqual(
     tabs.map((tab) => tab.textContent),
-    ['模型分组', '请求身份改写'],
+    ['模型分组', '请求身份改写', '活动视图'],
   )
   assert.equal(tabs[0].getAttribute('aria-selected'), 'true')
 

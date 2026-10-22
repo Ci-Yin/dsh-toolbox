@@ -30,7 +30,14 @@ export const MAX_CATALOG_MODELS = 10000
 export const MAX_GROUP_NAME = 80
 export const MAX_MODEL_KEY = 240
 
-const CONFIG_KEYS = new Set(['version', 'mode', 'groups', 'showUngrouped', 'preserveProviderGroups'])
+const CONFIG_KEYS = new Set([
+  'version',
+  'mode',
+  'groups',
+  'showUngrouped',
+  'preserveProviderGroups',
+  'activityViewEnabled',
+])
 const GROUP_KEYS = new Set(['id', 'name', 'order', 'collapsed', 'modelKeys'])
 const LEGACY_GROUP_KEYS = new Set(['id', 'name', 'order', 'collapsed', 'models', 'modelKeys'])
 
@@ -60,6 +67,7 @@ export function createDefaultConfig() {
     ],
     showUngrouped: true,
     preserveProviderGroups: false,
+    activityViewEnabled: false,
   }
 }
 
@@ -155,6 +163,7 @@ export function migrateConfig(raw) {
     groups: renumberGroups(sortGroups(groups)),
     showUngrouped: asBoolean(raw.showUngrouped, true, 'showUngrouped'),
     preserveProviderGroups: asBoolean(raw.preserveProviderGroups, false, 'preserveProviderGroups'),
+    activityViewEnabled: asBoolean(raw.activityViewEnabled, false, 'activityViewEnabled'),
     __migratedFrom: version,
   }
 }

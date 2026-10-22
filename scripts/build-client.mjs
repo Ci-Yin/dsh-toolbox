@@ -24,6 +24,7 @@ const modules = [
   'src/styles.js',
   'src/model-selector.js',
   'src/settings-panel.js',
+  'src/activity-sidebar.js',
   'src/features.js',
 ]
 
@@ -118,7 +119,7 @@ ${transformed
     ({ id, code, exports }) => `    __defs[${JSON.stringify(id)}] = () => {
 ${code
   .split('\n')
-  .map((line) => `      ${line}`)
+  .map((line) => line === '' ? '' : `      ${line}`)
   .join('\n')}
       return { ${exports.join(', ')} }
     }`,
