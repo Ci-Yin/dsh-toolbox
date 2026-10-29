@@ -23,6 +23,7 @@ const modules = [
   'src/i18n.js',
   'src/styles.js',
   'src/model-selector.js',
+  'src/workspace-flat-toggle.js',
   'src/settings-panel.js',
   'src/features.js',
 ]
@@ -118,7 +119,7 @@ ${transformed
     ({ id, code, exports }) => `    __defs[${JSON.stringify(id)}] = () => {
 ${code
   .split('\n')
-  .map((line) => `      ${line}`)
+  .map((line) => (line.length > 0 ? `      ${line}` : ''))
   .join('\n')}
       return { ${exports.join(', ')} }
     }`,

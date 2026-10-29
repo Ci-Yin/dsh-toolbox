@@ -2,11 +2,13 @@
  * DSH Toolbox feature registry.
  *
  * Each feature owns one capability and can be added without touching the
- * feature's neighbours. Today the registry contains model groups/search; a
- * message editing or rollback feature can be appended in a later phase.
+ * feature's neighbours. Today the registry contains workspace flat-list
+ * switching and model groups/search; a message editing or rollback feature
+ * can be appended in a later phase.
  */
 
 import { createModelSelectorController } from './model-selector.js'
+import { createWorkspaceFlatToggleController } from './workspace-flat-toggle.js'
 import { createSettingsPanel } from './settings-panel.js'
 import { NS, en, zh } from './i18n.js'
 
@@ -67,8 +69,31 @@ function selectToolboxTab(dialog) {
 }
 
 /**
- * Feature 1: searchable model picker with persistent custom groups.
+ * Shortcut for toggling the native workspace browser into one flat list.
  */
+export const workspaceFlatToggleFeature = {
+  id: 'workspace-flat-toggle',
+  name: 'Workspace flat-list toggle',
+  description: 'Toggle the native workspace browser between one list and the previous grouped view.',
+  inject: ['slots', 'locale'],
+  defaultEnabled: true,
+
+  apply(ctx, helpers) {
+    const doc = typeof document !== 'undefined' ? document : null
+    const win = typeof window !== 'undefined' ? window : null
+    const controller = createWorkspaceFlatToggleController({
+      document: doc,
+      window: win,
+      slots: ctx.slots,
+      t: helpers.t,
+      logger: ctx.logger ?? console,
+    })
+    helpers.workspaceFlatToggle = controller
+    if (doc) controller.start()
+    return () => controller.stop()
+  },
+}
+
 export const modelGroupsFeature = {
   id: 'model-groups',
   name: 'Model groups and search',
@@ -134,7 +159,7 @@ export const modelGroupsFeature = {
 }
 
 /** Active features. Append `messageEditFeature` here in phase 2. */
-export const features = [modelGroupsFeature]
+export const features = [modelGroupsFeature, workspaceFlatToggleFeature]
 
 /**
  * Build the plugin face consumed by the Web module factory.
@@ -146,9 +171,11 @@ export function createToolbox({ React }) {
     apply(ctx) {
       const t = ctx.locale.bind(NS)
       ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-toolbox: locale dictionaries')
-      const helpers = { React, t, ctx, controller: null }
+      const helpers = { React, t, ctx, controller: null, workspaceFlatToggle: null }
       const offLocale = ctx.locale.subscribe(() => {
-        helpers.controller?.setTranslator(ctx.locale.bind(NS))
+        const nextTranslator = ctx.locale.bind(NS)
+        helpers.controller?.setTranslator(nextTranslator)
+        helpers.workspaceFlatToggle?.setTranslator(nextTranslator)
       })
       ctx.effect(
         () => () => {

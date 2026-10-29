@@ -28,7 +28,7 @@ window.__ModuleLoader__.load({
        *
        * @module dsh-toolbox/identity-core
        */
-      
+
       /** Header names a rule may never override: credentials, framing, and cookies. */
       const RESERVED_HEADERS = Object.freeze([
         'authorization',
@@ -42,9 +42,9 @@ window.__ModuleLoader__.load({
         'connection',
         'transfer-encoding',
       ])
-      
+
       const RESERVED = new Set(RESERVED_HEADERS)
-      
+
       /** Hard caps; enforced on save so a config document can never grow unbounded. */
       const IDENTITY_LIMITS = Object.freeze({
         maxRules: 32,
@@ -57,18 +57,18 @@ window.__ModuleLoader__.load({
         ruleId: 64,
         testBodyBytes: 8192,
       })
-      
+
       /** RFC 7230 token: the only shape an HTTP header name may take. */
       const HEADER_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/u
-      
+
       /** C0 controls and DEL are never legal inside a header value. */
       const CONTROL_CHARS = /[\u0000-\u001f\u007f]/u
-      
+
       /** The empty identity configuration, used before any profile config loads. */
       function emptyIdentityConfig() {
         return { enabled: true, diagnostics: false, rules: [] }
       }
-      
+
       /** Coerce anything into a plain string without throwing on exotic values. */
       function text(value) {
         if (value === null || value === undefined) return ''
@@ -76,28 +76,28 @@ window.__ModuleLoader__.load({
         if (typeof value === 'number' || typeof value === 'boolean') return String(value)
         return ''
       }
-      
+
       /** Trim and cap a URL pattern; the match itself is a case-insensitive substring. */
       function normalizeUrlPattern(value) {
         return text(value).trim().slice(0, IDENTITY_LIMITS.urlPattern)
       }
-      
+
       /** Normalize a header name for storage (lowercase) without validating it. */
       function normalizeHeaderName(value) {
         return text(value).trim().toLowerCase()
       }
-      
+
       /** Whether a header name is on the never-override list. */
       function isReservedHeader(name) {
         return RESERVED.has(normalizeHeaderName(name))
       }
-      
+
       /** Whether a header name is a syntactically valid, non-reserved token. */
       function isValidHeaderName(name) {
         const normalized = normalizeHeaderName(name)
         return normalized.length > 0 && normalized.length <= IDENTITY_LIMITS.headerName && HEADER_NAME.test(normalized)
       }
-      
+
       /**
        * Derive a stable, readable rule id from a URL pattern. Slugs are lowercase and
        * dash-joined so the id is safe in a YAML document and in a DOM attribute.
@@ -120,12 +120,12 @@ window.__ModuleLoader__.load({
         }
         return candidate
       }
-      
+
       /** Normalize an id read from a document, preserving its case for display. */
       function normalizeRuleId(value) {
         return text(value).trim().slice(0, IDENTITY_LIMITS.ruleId)
       }
-      
+
       /**
        * Validate and normalize one rule.
        *
@@ -139,22 +139,22 @@ window.__ModuleLoader__.load({
         const source = input !== null && typeof input === 'object' ? input : {}
         const errors = []
         const droppedHeaders = []
-      
+
         const urlPattern = normalizeUrlPattern(source.urlPattern)
         if (urlPattern.length === 0) {
           errors.push({ field: 'urlPattern', code: 'url-pattern-required' })
         } else if (CONTROL_CHARS.test(urlPattern)) {
           errors.push({ field: 'urlPattern', code: 'url-pattern-control' })
         }
-      
+
         const userAgent = text(source.userAgent).trim().slice(0, IDENTITY_LIMITS.userAgent)
         if (CONTROL_CHARS.test(userAgent)) errors.push({ field: 'userAgent', code: 'user-agent-control' })
-      
+
         const note = text(source.note).trim().slice(0, IDENTITY_LIMITS.note)
-      
+
         let id = normalizeRuleId(source.id)
         if (id.length === 0) id = suggestRuleId(urlPattern, [])
-      
+
         const headers = []
         const rawHeaders = Array.isArray(source.headers) ? source.headers : []
         if (rawHeaders.length > IDENTITY_LIMITS.maxHeadersPerRule) {
@@ -179,7 +179,7 @@ window.__ModuleLoader__.load({
           }
           headers.push({ name, value })
         }
-      
+
         return {
           rule: {
             id,
@@ -193,7 +193,7 @@ window.__ModuleLoader__.load({
           droppedHeaders,
         }
       }
-      
+
       /**
        * Validate a whole identity document.
        *
@@ -203,7 +203,7 @@ window.__ModuleLoader__.load({
         const source = input !== null && typeof input === 'object' ? input : {}
         const errors = []
         const droppedHeaders = []
-      
+
         if (source.enabled !== undefined && typeof source.enabled !== 'boolean') {
           errors.push({ field: 'enabled', code: 'invalid-enabled' })
         }
@@ -213,12 +213,12 @@ window.__ModuleLoader__.load({
         if (source.rules !== undefined && !Array.isArray(source.rules)) {
           errors.push({ field: 'rules', code: 'invalid-rules' })
         }
-      
+
         const rawRules = Array.isArray(source.rules) ? source.rules : []
         if (rawRules.length > IDENTITY_LIMITS.maxRules) {
           errors.push({ field: 'rules', code: 'too-many-rules' })
         }
-      
+
         const seen = new Set()
         const rules = []
         for (const [index, raw] of rawRules.slice(0, IDENTITY_LIMITS.maxRules).entries()) {
@@ -233,7 +233,7 @@ window.__ModuleLoader__.load({
           seen.add(key)
           rules.push(sanitized.rule)
         }
-      
+
         return {
           value: {
             enabled: source.enabled !== false,
@@ -244,7 +244,7 @@ window.__ModuleLoader__.load({
           droppedHeaders,
         }
       }
-      
+
       /**
        * Pick the identity rule for a URL.
        *
@@ -268,13 +268,13 @@ window.__ModuleLoader__.load({
         }
         return best
       }
-      
+
       /** The custom headers a rule actually applies, reserved names excluded. */
       function applicableHeaders(rule) {
         if (!rule || !Array.isArray(rule.headers)) return []
         return rule.headers.filter((header) => isValidHeaderName(header?.name) && !isReservedHeader(header.name))
       }
-      
+
       /** Extract a host for a `urlPattern` so a provider rule can be identified in the UI. */
       function hostFromPattern(urlPattern) {
         const raw = text(urlPattern).trim()
@@ -285,14 +285,14 @@ window.__ModuleLoader__.load({
           return raw.replace(/^[a-z]+:\/\//iu, '').replace(/[/?#].*$/u, '')
         }
       }
-      
+
       /** Join a provider baseURL with the model-listing path the test button probes. */
       function modelsUrlFor(baseURL) {
         const trimmed = text(baseURL).trim().replace(/\/+$/u, '')
         if (trimmed.length === 0) return ''
         return /\/models$/u.test(trimmed) ? trimmed : `${trimmed}/models`
       }
-      
+
       /** Whether a URL is one a rule is allowed to touch at all. */
       function isRewritableUrl(url) {
         try {
@@ -302,7 +302,7 @@ window.__ModuleLoader__.load({
           return false
         }
       }
-      
+
       /**
        * Bounded, content-free hit accounting for the settings card.
        *
@@ -315,7 +315,7 @@ window.__ModuleLoader__.load({
         const maxRules = options.maxRules ?? IDENTITY_LIMITS.maxRules
         const records = new Map()
         let last = null
-      
+
         return {
           record(ruleId, url, beforeUserAgent, afterUserAgent, at = Date.now()) {
             if (typeof ruleId !== 'string' || ruleId.length === 0) return
@@ -378,12 +378,12 @@ window.__ModuleLoader__.load({
        *
        * @module dsh-toolbox/identity-client
        */
-      
+
       const { IDENTITY_LIMITS, hostFromPattern, isReservedHeader, isValidHeaderName, modelsUrlFor, sanitizeRule, suggestRuleId } = __require("src/identity-core.js")
-      
+
       const IDENTITY_API = '/api/dsh-toolbox.identity'
       const IDENTITY_TEST_API = '/api/dsh-toolbox.identity-test'
-      
+
       /** HTTP client for the host routes, tolerant of a missing/older host. */
       function createIdentityApi(win = globalThis) {
         const request = async (path, init) => {
@@ -410,7 +410,7 @@ window.__ModuleLoader__.load({
           }
           return body
         }
-      
+
         return {
           read() {
             return request(IDENTITY_API, { headers: { accept: 'application/json' } })
@@ -431,7 +431,7 @@ window.__ModuleLoader__.load({
           },
         }
       }
-      
+
       /** Coerce a host snapshot into the shape the card edits. */
       function normalizeIdentityValue(value) {
         return {
@@ -454,7 +454,7 @@ window.__ModuleLoader__.load({
             : [],
         }
       }
-      
+
       /** Turn the card's draft state into a rule the host will accept. */
       function draftToRule(draft, rules = [], editingId = null) {
         const id = editingId ?? suggestRuleId(draft?.urlPattern, rules.map((rule) => rule.id).filter((existing) => existing !== editingId))
@@ -467,7 +467,7 @@ window.__ModuleLoader__.load({
           headers: draft?.headers ?? [],
         })
       }
-      
+
       /** Map sanitizer error codes onto `field` keys for inline display. */
       function errorsByField(errors = []) {
         const out = {}
@@ -477,7 +477,7 @@ window.__ModuleLoader__.load({
         }
         return out
       }
-      
+
       /** Human-readable text for a route/discovery failure. */
       function identityErrorText(t, error) {
         const code = error?.code ?? 'unknown'
@@ -506,18 +506,18 @@ window.__ModuleLoader__.load({
             return t('identity.error.generic', { message: error?.message ?? String(error) })
         }
       }
-      
+
       /** Build the identity card component for the settings tab. */
       function createIdentitySection(React) {
         const h = React.createElement
         const { useState, useEffect, useMemo, useCallback } = React
-      
+
         return function IdentitySection(props) {
           const t = props.t ?? ((key) => key)
           const win = props.win ?? globalThis
-      
+
           const api = useMemo(() => createIdentityApi(win), [win])
-      
+
           const [phase, setPhase] = useState('loading') // loading | ready | unsupported | error
           const [snapshot, setSnapshot] = useState(null)
           const [draft, setDraft] = useState(null)
@@ -527,7 +527,7 @@ window.__ModuleLoader__.load({
           const [providerId, setProviderId] = useState('')
           const [testUrl, setTestUrl] = useState('')
           const [testResult, setTestResult] = useState(null)
-      
+
           const acceptSnapshot = useCallback((body) => {
             const value = normalizeIdentityValue(body?.value)
             setSnapshot({
@@ -546,7 +546,7 @@ window.__ModuleLoader__.load({
               setTestUrl((current) => current || modelsUrlFor(firstWithBase.baseURL))
             }
           }, [])
-      
+
           const load = useCallback(async () => {
             try {
               const body = await api.read()
@@ -565,11 +565,11 @@ window.__ModuleLoader__.load({
               setNotice({ kind: 'error', message: identityErrorText(t, error) })
             }
           }, [api, acceptSnapshot, t])
-      
+
           useEffect(() => {
             load()
           }, [load])
-      
+
           const commit = useCallback(
             async (nextValue, successMessage) => {
               if (snapshot === null) return false
@@ -604,11 +604,11 @@ window.__ModuleLoader__.load({
             },
             [acceptSnapshot, api, load, snapshot, t],
           )
-      
+
           const value = snapshot?.value ?? { enabled: false, diagnostics: false, rules: [] }
           const rules = value.rules
           const stats = snapshot?.stats ?? {}
-      
+
           const replaceRule = useCallback(
             (ruleId, update) => {
               const next = rules.map((rule) => (rule.id === ruleId ? update(rule) : rule))
@@ -616,7 +616,7 @@ window.__ModuleLoader__.load({
             },
             [commit, rules, value],
           )
-      
+
           const moveRule = (index, delta) => {
             const target = index + delta
             if (target < 0 || target >= rules.length) return
@@ -625,13 +625,13 @@ window.__ModuleLoader__.load({
             next.splice(target, 0, moved)
             commit({ ...value, rules: next })
           }
-      
+
           const removeRule = (rule) => {
             const confirmMessage = t('identity.deleteConfirm', { pattern: rule.urlPattern })
             if (typeof win?.confirm === 'function' && !win.confirm(confirmMessage)) return
             commit({ ...value, rules: rules.filter((entry) => entry.id !== rule.id) })
           }
-      
+
           const beginNew = (seed = {}) => {
             setFieldErrors({})
             setDraft({
@@ -642,7 +642,7 @@ window.__ModuleLoader__.load({
               headers: [],
             })
           }
-      
+
           const beginEdit = (rule) => {
             setFieldErrors({})
             setDraft({
@@ -653,7 +653,7 @@ window.__ModuleLoader__.load({
               headers: rule.headers.map((header) => ({ ...header })),
             })
           }
-      
+
           const saveDraft = async () => {
             if (draft === null) return
             const sanitized = draftToRule(draft, rules, draft.editingId)
@@ -670,16 +670,16 @@ window.__ModuleLoader__.load({
             const saved = await commit({ ...value, rules: nextRules })
             if (saved) setDraft(null)
           }
-      
+
           const selectedProvider = snapshot?.providers?.find((provider) => provider.provider === providerId) ?? null
-      
+
           const generateFromProvider = () => {
             if (selectedProvider === null) return
             const pattern = hostFromPattern(selectedProvider.baseURL) || selectedProvider.provider
             beginNew({ urlPattern: pattern, note: selectedProvider.displayName ?? selectedProvider.provider })
             if (testUrl.trim().length === 0) setTestUrl(modelsUrlFor(selectedProvider.baseURL))
           }
-      
+
           const runTest = async () => {
             const url = testUrl.trim()
             if (url.length === 0) return
@@ -694,19 +694,19 @@ window.__ModuleLoader__.load({
               setBusy(false)
             }
           }
-      
+
           const fieldError = (field) => {
             const code = fieldErrors[field]
             return code === undefined ? null : t(`identity.fieldError.${code}`)
           }
-      
+
           const reservedDraftHeaders =
             draft === null
               ? []
               : draft.headers
                   .map((header) => header.name.trim().toLowerCase())
                   .filter((name) => name.length > 0 && isReservedHeader(name))
-      
+
           const ruleRows = rules.map((rule, index) => {
             const hits = stats[rule.id] ?? null
             const matchText =
@@ -792,7 +792,7 @@ window.__ModuleLoader__.load({
               ),
             )
           })
-      
+
           const editor =
             draft === null
               ? null
@@ -953,9 +953,9 @@ window.__ModuleLoader__.load({
                     ),
                   ),
                 )
-      
+
           const ready = phase === 'ready' && snapshot !== null
-      
+
           return h(
             'div',
             { className: 'dsh-toolbox-card', 'data-feature': 'identity' },
@@ -977,7 +977,7 @@ window.__ModuleLoader__.load({
             h('p', { className: 'dsh-toolbox-muted' }, t('identity.description')),
             h('p', { className: 'dsh-toolbox-identity-hint' }, t('identity.scope')),
             h('p', { className: 'dsh-toolbox-identity-warn' }, t('identity.risk')),
-      
+
             notice !== null
               ? h(
                   'div',
@@ -985,7 +985,7 @@ window.__ModuleLoader__.load({
                   notice.message,
                 )
               : null,
-      
+
             phase === 'loading' ? h('p', { className: 'dsh-toolbox-muted' }, t('identity.loading')) : null,
             phase === 'unsupported'
               ? h(
@@ -1010,7 +1010,7 @@ window.__ModuleLoader__.load({
                   ),
                 )
               : null,
-      
+
             ready
               ? h(
                   'div',
@@ -1031,11 +1031,11 @@ window.__ModuleLoader__.load({
                       t('identity.newRule'),
                     ),
                   ),
-      
+
                   rules.length === 0
                     ? h('p', { className: 'dsh-toolbox-muted' }, t('identity.empty'))
                     : h('div', { className: 'dsh-toolbox-identity-rules' }, ruleRows),
-      
+
                   h(
                     'div',
                     { className: 'dsh-toolbox-row' },
@@ -1072,9 +1072,9 @@ window.__ModuleLoader__.load({
                       t('identity.generateFromProvider'),
                     ),
                   ),
-      
+
                   editor,
-      
+
                   h(
                     'div',
                     { className: 'dsh-toolbox-identity-test' },
@@ -1134,7 +1134,7 @@ window.__ModuleLoader__.load({
                             testResult.message,
                           ),
                   ),
-      
+
                   h(
                     'div',
                     { className: 'dsh-toolbox-pref' },
@@ -1168,7 +1168,7 @@ window.__ModuleLoader__.load({
        * the stable key is derived from the provider and model ids that the host puts
        * on the model label (`data-provider-id` / `data-model-id`).
        */
-      
+
       const MODEL_MENU_SELECTOR = '[role="menu"][id$="-models"]'
       const MODEL_GROUP_SELECTOR = 'section[data-menu-group]'
       const MODEL_ROW_SELECTOR = 'button[role="menuitemradio"]'
@@ -1180,7 +1180,7 @@ window.__ModuleLoader__.load({
         '.dms-input',
         '[class*="dms-"]',
       ].join(', ')
-      
+
       const EXTERNAL_INPUT_SELECTOR = [
         '[data-dsh-model-search] input',
         '[data-dsh-plugin="dsh-model-search"] input',
@@ -1189,25 +1189,25 @@ window.__ModuleLoader__.load({
         '.dms-input',
         '[class*="dms-"] input',
       ].join(', ')
-      
+
       const KEY_SEPARATOR = '/'
       const ESCAPE_TILDE = '~0'
       const ESCAPE_SLASH = '~1'
-      
+
       /** Escape one key part so `provider/model` stays reversible. */
       function escapeKeyPart(value) {
         return String(value ?? '')
           .replaceAll('~', ESCAPE_TILDE)
           .replaceAll('/', ESCAPE_SLASH)
       }
-      
+
       /** Undo {@link escapeKeyPart}. */
       function unescapeKeyPart(value) {
         return String(value ?? '')
           .replaceAll(ESCAPE_SLASH, '/')
           .replaceAll(ESCAPE_TILDE, '~')
       }
-      
+
       /**
        * Build the stable key used by every stored group.
        * @param {string} providerId
@@ -1217,7 +1217,7 @@ window.__ModuleLoader__.load({
       function makeModelKey(providerId, modelId) {
         return `${escapeKeyPart(providerId)}${KEY_SEPARATOR}${escapeKeyPart(modelId)}`
       }
-      
+
       /**
        * Reverse a key when diagnostics or a migration need its two parts.
        * @param {string} key
@@ -1232,7 +1232,7 @@ window.__ModuleLoader__.load({
           modelId: unescapeKeyPart(text.slice(index + 1)),
         }
       }
-      
+
       /** Normalize a key imported from an older or hand-edited config. */
       function normalizeModelKey(value) {
         if (typeof value !== 'string') return ''
@@ -1252,7 +1252,7 @@ window.__ModuleLoader__.load({
         // will be reported as missing rather than silently attached to another model.
         return text
       }
-      
+
       /** Read the provider and model ids from a model row's label span. */
       function readIdentity(button) {
         const label = button.querySelector?.(MODEL_LABEL_SELECTOR)
@@ -1260,16 +1260,16 @@ window.__ModuleLoader__.load({
         const modelId = String(label?.getAttribute?.('data-model-id') ?? '').trim()
         return { providerId, modelId }
       }
-      
+
       function fallbackProviderId(name) {
         const text = String(name ?? '').trim()
         return text === '' ? 'provider:unknown' : `provider:${text}`
       }
-      
+
       function cleanText(value) {
         return String(value ?? '').replace(/\s+/gu, ' ').trim()
       }
-      
+
       function readProviderName(group) {
         const heading = group.querySelector?.('[data-menu-group-heading]')
         if (heading) {
@@ -1286,7 +1286,7 @@ window.__ModuleLoader__.load({
         }
         return cleanText(group.getAttribute?.('aria-label') ?? '')
       }
-      
+
       function readModelName(button, modelId) {
         const title = cleanText(button.getAttribute?.('title') ?? '')
         if (title !== '') return title
@@ -1295,7 +1295,7 @@ window.__ModuleLoader__.load({
         if (text !== '') return text
         return modelId
       }
-      
+
       /**
        * Read one model row. The returned row is a plain record; the live button is
        * retained only so the selector can show/hide it without replacing it.
@@ -1318,7 +1318,7 @@ window.__ModuleLoader__.load({
           button,
         }
       }
-      
+
       /**
        * Read every model row from a model pane.
        * @param {Element} menu the `[role="menu"][id$="-models"]` groups container
@@ -1335,11 +1335,11 @@ window.__ModuleLoader__.load({
         const models = []
         const duplicateKeys = []
         const seen = new Set()
-      
+
         const groupElements = menu?.querySelectorAll
           ? [...menu.querySelectorAll(MODEL_GROUP_SELECTOR)]
           : []
-      
+
         if (groupElements.length === 0) {
           // A future host may flatten the model pane. Keep the enhancement useful
           // rather than failing the whole menu: treat all direct rows as one group.
@@ -1348,7 +1348,7 @@ window.__ModuleLoader__.load({
             groupElements.push(menu)
           }
         }
-      
+
         for (const element of groupElements) {
           const isSynthetic = element === menu
           const providerName = isSynthetic
@@ -1376,7 +1376,7 @@ window.__ModuleLoader__.load({
             models: [],
           }
           groups.push(groupRecord)
-      
+
           for (const button of buttons) {
             const row = readModelRow(button, provider)
             if (row === null) continue
@@ -1389,7 +1389,7 @@ window.__ModuleLoader__.load({
             models.push(row)
           }
         }
-      
+
         const providerMap = new Map()
         for (const group of groups) {
           if (!providerMap.has(group.providerId)) {
@@ -1399,7 +1399,7 @@ window.__ModuleLoader__.load({
             })
           }
         }
-      
+
         return {
           menu,
           groups,
@@ -1408,7 +1408,7 @@ window.__ModuleLoader__.load({
           duplicateKeys,
         }
       }
-      
+
       /**
        * Find the innermost model panes under a root.
        * @param {ParentNode} root
@@ -1418,7 +1418,7 @@ window.__ModuleLoader__.load({
         if (!root?.querySelectorAll) return []
         const direct = [...root.querySelectorAll(MODEL_MENU_SELECTOR)]
         if (direct.length > 0) return direct
-      
+
         const menuNodes = [...root.querySelectorAll('[role="menu"]')]
         const withGroups = menuNodes.filter((menu) => menu.querySelector?.(MODEL_GROUP_SELECTOR) != null)
         return withGroups.filter((menu) => {
@@ -1428,7 +1428,7 @@ window.__ModuleLoader__.load({
           return true
         })
       }
-      
+
       /** Whether another search plugin already owns the search row for this menu. */
       function detectExternalSearch(menu) {
         const pane = menu?.parentElement ?? menu
@@ -1437,19 +1437,19 @@ window.__ModuleLoader__.load({
         const root = pane.closest?.('[class*="ModelSelect"], [data-model-select]') ?? pane.parentElement
         return root?.querySelector?.(EXTERNAL_SEARCH_SELECTOR) != null
       }
-      
+
       /** Find a cooperating search plugin's input, if one is present. */
       function findExternalSearchInput(menu) {
         const pane = menu?.parentElement ?? menu
         return pane?.querySelector?.(EXTERNAL_INPUT_SELECTOR) ?? null
       }
-      
+
       /** Read a query from a cooperating search plugin, if one is present. */
       function readExternalQuery(menu) {
         const input = findExternalSearchInput(menu)
         return typeof input?.value === 'string' ? input.value : ''
       }
-      
+
       /** A compact fingerprint used to avoid rewriting the catalog cache on every mutation. */
       function catalogFingerprint(models) {
         let hash = 2166136261
@@ -1467,7 +1467,7 @@ window.__ModuleLoader__.load({
         }
         return `${records.length}:${hash >>> 0}`
       }
-      
+
       /** Convert live rows into the serializable shape kept in the catalog cache. */
       function toCatalogSnapshot(models) {
         return models.map(({ key, providerId, providerName, modelId, name }) => ({
@@ -1487,9 +1487,9 @@ window.__ModuleLoader__.load({
        * Nothing in this module touches the DOM or localStorage; the selector and the
        * settings page both consume the same results so their behavior cannot drift.
        */
-      
+
       const { makeModelKey, normalizeModelKey } = __require("src/model-catalog.js")
-      
+
       const VIEW_ALL = 'all'
       const VIEW_CUSTOM = 'custom'
       const VIEW_PROVIDER = 'provider'
@@ -1498,16 +1498,16 @@ window.__ModuleLoader__.load({
       const SEARCH_ID = 'search'
       const DEFAULT_GROUP_ID = 'favorites'
       const DEFAULT_GROUP_NAME = '常用'
-      
+
       const MAX_NAME = 80
       const MAX_GROUPS = 64
-      
+
       /** Normalize a user-entered group name. */
       function cleanGroupName(value, fallback = '新分组') {
         const text = String(value ?? '').replace(/\s+/gu, ' ').trim()
         return (text || fallback).slice(0, MAX_NAME)
       }
-      
+
       /** Create a stable, URL-safe group id. */
       function createGroupId(existingIds = []) {
         const taken = new Set(existingIds)
@@ -1520,7 +1520,7 @@ window.__ModuleLoader__.load({
         while (taken.has(`g-${index}`)) index += 1
         return `g-${index}`
       }
-      
+
       /** Ensure a group id is safe and not one of the reserved view ids. */
       function normalizeGroupId(value) {
         const text = String(value ?? '').trim().toLowerCase()
@@ -1530,7 +1530,7 @@ window.__ModuleLoader__.load({
         const cleaned = text.replace(/[^a-z0-9_-]/gu, '').slice(0, 64)
         return /^[a-z0-9][a-z0-9_-]{0,63}$/u.test(cleaned) ? cleaned : ''
       }
-      
+
       /** Sort ascending by order, then by name/id. */
       function sortGroups(groups) {
         return [...(Array.isArray(groups) ? groups : [])].sort((left, right) => {
@@ -1539,24 +1539,24 @@ window.__ModuleLoader__.load({
           return String(left?.name ?? '').localeCompare(String(right?.name ?? ''), 'zh-Hans-CN')
         })
       }
-      
+
       /** Renumber groups in their given order after an insertion, deletion, or move. */
       function renumberGroups(groups) {
         return (Array.isArray(groups) ? groups : []).map((group, index) => ({ ...group, order: index }))
       }
-      
+
       /** Count how many model keys in a group exist in the current catalog. */
       function groupItems(models, keys) {
         const wanted = new Set(keys)
         return models.filter((model) => wanted.has(model.key))
       }
-      
+
       /** Keys that no longer resolve to a catalog model. */
       function missingKeysForGroup(group, models) {
         const available = new Set(models.map((model) => model.key))
         return (group.modelKeys ?? []).map(normalizeModelKey).filter((key) => key !== '' && !available.has(key))
       }
-      
+
       /**
        * Build the custom groups plus the virtual `未分组` group.
        * A model may appear in several groups; `未分组` contains only models that no
@@ -1584,7 +1584,7 @@ window.__ModuleLoader__.load({
             missingModelKeys: missingKeysForGroup(group, catalog),
           }
         })
-      
+
         const ungrouped = catalog.filter((model) => !assigned.has(model.key))
         if (config?.showUngrouped !== false && ungrouped.length > 0) {
           result.push({
@@ -1600,17 +1600,17 @@ window.__ModuleLoader__.load({
             missingModelKeys: [],
           })
         }
-      
+
         return result
       }
-      
+
       /** Split a query into lower-case search terms. */
       function queryTokens(query) {
         const text = String(query ?? '').trim().toLowerCase()
         if (text === '') return []
         return text.split(/\s+/u).filter(Boolean)
       }
-      
+
       /**
        * Match provider name, provider id, visible model name, and model id.
        * Every whitespace-separated term must match. `@provider` restricts a term to
@@ -1635,14 +1635,14 @@ window.__ModuleLoader__.load({
           return combined.includes(token)
         })
       }
-      
+
       /** Filter the catalog without mutating it. */
       function filterModels(models, query) {
         const catalog = Array.isArray(models) ? models : []
         if (queryTokens(query).length === 0) return catalog
         return catalog.filter((model) => matchesQuery(model, query))
       }
-      
+
       /**
        * Resolve which view the menu should open with.
        * @param {object} config
@@ -1671,7 +1671,7 @@ window.__ModuleLoader__.load({
         }
         return null
       }
-      
+
       /**
        * Build the complete presentation model for one menu render.
        * A non-empty query searches the whole catalog; otherwise the selected group
@@ -1686,7 +1686,7 @@ window.__ModuleLoader__.load({
         const grouped = groupModels(catalog, config)
         const groupedById = new Map(grouped.map((group) => [group.id, group]))
         const searching = queryTokens(query).length > 0
-      
+
         let active = null
         let items = []
         if (searching) {
@@ -1709,7 +1709,7 @@ window.__ModuleLoader__.load({
             items = catalog
           }
         }
-      
+
         const visibleKeys = new Set(items.map((model) => model.key))
         const counts = new Map()
         for (const group of grouped) counts.set(group.id, group.count)
@@ -1717,7 +1717,7 @@ window.__ModuleLoader__.load({
         for (const group of grouped) {
           if (group.missingModelKeys.length > 0) missing.set(group.id, group.missingModelKeys)
         }
-      
+
         return {
           models: catalog,
           grouped,
@@ -1736,7 +1736,7 @@ window.__ModuleLoader__.load({
           ungrouped: grouped.find((group) => group.type === 'ungrouped') ?? null,
         }
       }
-      
+
       /** Move a group one slot up or down. */
       function moveGroup(groups, id, delta) {
         const sorted = sortGroups(groups)
@@ -1749,7 +1749,7 @@ window.__ModuleLoader__.load({
         next.splice(target, 0, group)
         return renumberGroups(next)
       }
-      
+
       /** Move `sourceId` to `targetId`'s current position (drag-and-drop). */
       function reorderGroups(groups, sourceId, targetId) {
         const sorted = sortGroups(groups)
@@ -1761,7 +1761,7 @@ window.__ModuleLoader__.load({
         next.splice(to, 0, group)
         return renumberGroups(next)
       }
-      
+
       /** Add a group and return a new config. */
       function addGroup(config, name, options = {}) {
         const groups = sortGroups(config?.groups ?? [])
@@ -1778,13 +1778,13 @@ window.__ModuleLoader__.load({
         }
         return { ...config, groups: renumberGroups([...groups, group]) }
       }
-      
+
       /** Remove a group; model records and the host's catalog are untouched. */
       function removeGroup(config, id) {
         const groups = sortGroups(config?.groups ?? []).filter((group) => group.id !== id)
         return { ...config, groups: renumberGroups(groups) }
       }
-      
+
       /** Rename a group without changing its membership. */
       function renameGroup(config, id, name) {
         return {
@@ -1794,7 +1794,7 @@ window.__ModuleLoader__.load({
           ),
         }
       }
-      
+
       /** Persist a group's folded state. */
       function setGroupCollapsed(config, id, collapsed) {
         return {
@@ -1804,7 +1804,7 @@ window.__ModuleLoader__.load({
           ),
         }
       }
-      
+
       /** Add or remove one model key from one group. */
       function toggleModelInGroup(config, id, modelKey, member) {
         const key = normalizeModelKey(modelKey)
@@ -1822,7 +1822,7 @@ window.__ModuleLoader__.load({
           }),
         }
       }
-      
+
       /** Replace a group's entire membership (bulk add/remove). */
       function setGroupModels(config, id, modelKeys) {
         const keys = [...new Set((modelKeys ?? []).map(normalizeModelKey).filter(Boolean))]
@@ -1833,7 +1833,7 @@ window.__ModuleLoader__.load({
           ),
         }
       }
-      
+
       /** Add many keys at once. */
       function addModelsToGroup(config, id, modelKeys) {
         const additions = (modelKeys ?? []).map(normalizeModelKey).filter(Boolean)
@@ -1845,7 +1845,7 @@ window.__ModuleLoader__.load({
           }),
         }
       }
-      
+
       /** Remove many keys at once. */
       function removeModelsFromGroup(config, id, modelKeys) {
         const removals = new Set((modelKeys ?? []).map(normalizeModelKey).filter(Boolean))
@@ -1858,7 +1858,7 @@ window.__ModuleLoader__.load({
           ),
         }
       }
-      
+
       /** Remove stale keys from every group, preserving the rest. */
       function removeMissingModelKeys(config, availableKeys) {
         const available = new Set(availableKeys)
@@ -1870,7 +1870,7 @@ window.__ModuleLoader__.load({
           })),
         }
       }
-      
+
       /** A stable membership signature used to avoid unnecessary storage writes. */
       function configFingerprint(config) {
         return JSON.stringify({
@@ -1886,7 +1886,7 @@ window.__ModuleLoader__.load({
           })),
         })
       }
-      
+
       /** The default group used by a fresh install. */
       function createDefaultGroup() {
         return {
@@ -1897,7 +1897,7 @@ window.__ModuleLoader__.load({
           modelKeys: [],
         }
       }
-      
+
       /** Utility for settings: group a catalog by provider for the membership picker. */
       function modelsByProvider(models) {
         const map = new Map()
@@ -1913,7 +1913,7 @@ window.__ModuleLoader__.load({
         }
         return [...map.values()]
       }
-      
+
       /** Build a model key for callers that already have both ids. */
       function keyFor(providerId, modelId) {
         return makeModelKey(providerId, modelId)
@@ -1929,10 +1929,10 @@ window.__ModuleLoader__.load({
        * as plain JSON. Invalid or oversized imports are rejected before any write, so
        * the previous configuration survives.
        */
-      
+
       const { DEFAULT_GROUP_ID, DEFAULT_GROUP_NAME, VIEW_MODES, cleanGroupName, normalizeGroupId, renumberGroups, sortGroups } = __require("src/model-groups.js")
       const { normalizeModelKey, toCatalogSnapshot } = __require("src/model-catalog.js")
-      
+
       const STORAGE_KEY = 'dsh-toolbox:v1'
       const CATALOG_KEY = 'dsh-toolbox:catalog:v1'
       const CONFIG_EVENT = 'dsh-toolbox:config-changed'
@@ -1944,11 +1944,11 @@ window.__ModuleLoader__.load({
       const MAX_CATALOG_MODELS = 10000
       const MAX_GROUP_NAME = 80
       const MAX_MODEL_KEY = 240
-      
+
       const CONFIG_KEYS = new Set(['version', 'mode', 'groups', 'showUngrouped', 'preserveProviderGroups'])
       const GROUP_KEYS = new Set(['id', 'name', 'order', 'collapsed', 'modelKeys'])
       const LEGACY_GROUP_KEYS = new Set(['id', 'name', 'order', 'collapsed', 'models', 'modelKeys'])
-      
+
       /** A rejected config, with a machine-readable code and a user-facing path. */
       class ConfigValidationError extends Error {
         constructor(code, message, path = '') {
@@ -1958,7 +1958,7 @@ window.__ModuleLoader__.load({
           this.path = path
         }
       }
-      
+
       /** Fresh default configuration. Always return a new object. */
       function createDefaultConfig() {
         return {
@@ -1977,35 +1977,35 @@ window.__ModuleLoader__.load({
           preserveProviderGroups: false,
         }
       }
-      
+
       function fail(code, message, path = '') {
         throw new ConfigValidationError(code, message, path)
       }
-      
+
       function isPlainObject(value) {
         return typeof value === 'object' && value !== null && !Array.isArray(value)
       }
-      
+
       function rejectUnknownKeys(value, allowed, path) {
         if (!isPlainObject(value)) fail('invalid-type', 'Expected a JSON object', path)
         for (const key of Object.keys(value)) {
           if (!allowed.has(key)) fail('unknown-field', `Unknown field: ${key}`, path ? `${path}.${key}` : key)
         }
       }
-      
+
       function asBoolean(value, fallback, path) {
         if (value === undefined) return fallback
         if (typeof value !== 'boolean') fail('invalid-type', 'Expected a boolean', path)
         return value
       }
-      
+
       function asOrder(value, fallback, path) {
         if (value === undefined) return fallback
         const number = typeof value === 'number' ? value : Number(value)
         if (!Number.isFinite(number)) fail('invalid-type', 'Expected a finite number', path)
         return Math.max(0, Math.trunc(number))
       }
-      
+
       function normalizeKeys(value, path) {
         if (!Array.isArray(value)) fail('invalid-type', 'Expected an array of model keys', path)
         if (value.length > MAX_MODELS_PER_GROUP) {
@@ -2023,7 +2023,7 @@ window.__ModuleLoader__.load({
         }
         return keys
       }
-      
+
       function normalizeGroup(raw, index, version) {
         const path = `groups[${index}]`
         rejectUnknownKeys(raw, version === 0 ? LEGACY_GROUP_KEYS : GROUP_KEYS, path)
@@ -2042,7 +2042,7 @@ window.__ModuleLoader__.load({
           modelKeys: normalizeKeys(rawKeys, `${path}.modelKeys`),
         }
       }
-      
+
       /** Migrate version 0 (or an unversioned legacy object) to the current shape. */
       function migrateConfig(raw) {
         if (!isPlainObject(raw)) fail('invalid-type', 'Configuration must be a JSON object', '')
@@ -2073,22 +2073,22 @@ window.__ModuleLoader__.load({
           __migratedFrom: version,
         }
       }
-      
+
       /** Validate and normalize any accepted config shape. */
       function normalizeConfig(raw) {
         const migrated = migrateConfig(raw)
         const { __migratedFrom, ...config } = migrated
         return config
       }
-      
+
       /** Alias used by the settings panel and tests. */
       const validateConfig = normalizeConfig
-      
+
       function byteLength(text) {
         if (typeof TextEncoder === 'function') return new TextEncoder().encode(text).byteLength
         return unescape(encodeURIComponent(text)).length
       }
-      
+
       /** Parse an export/import payload. Throws {@link ConfigValidationError}. */
       function parseConfigText(text) {
         if (typeof text !== 'string') fail('invalid-type', 'Import must be a JSON string', '')
@@ -2103,13 +2103,13 @@ window.__ModuleLoader__.load({
         }
         return normalizeConfig(raw)
       }
-      
+
       /** Serialize a config for export. The output is stable enough for diffing. */
       function exportConfig(config) {
         const normalized = normalizeConfig(config)
         return `${JSON.stringify(normalized, null, 2)}\n`
       }
-      
+
       /** Resolve a storage-like object, preferring an explicit one. */
       function resolveStorage(storage) {
         if (storage && typeof storage.getItem === 'function') return storage
@@ -2119,7 +2119,7 @@ window.__ModuleLoader__.load({
           return null
         }
       }
-      
+
       function readText(storage, key) {
         const target = resolveStorage(storage)
         if (target === null) return null
@@ -2129,14 +2129,14 @@ window.__ModuleLoader__.load({
           return null
         }
       }
-      
+
       function writeText(storage, key, text) {
         const target = resolveStorage(storage)
         if (target === null) return false
         target.setItem(key, text)
         return true
       }
-      
+
       /**
        * Read configuration without throwing. The caller gets the fallback and the
        * diagnostic so a malformed value can be reported without losing the raw text.
@@ -2152,12 +2152,12 @@ window.__ModuleLoader__.load({
           return { config: createDefaultConfig(), error, raw: text }
         }
       }
-      
+
       /** Read configuration, falling back to defaults on a malformed value. */
       function loadConfig(storage) {
         return loadConfigResult(storage).config
       }
-      
+
       /** Persist a validated config. Throws before writing on invalid input. */
       function saveConfig(storage, config, target = null) {
         const normalized = normalizeConfig(config)
@@ -2165,19 +2165,19 @@ window.__ModuleLoader__.load({
         if (target) notifyConfigChanged(target, normalized)
         return normalized
       }
-      
+
       /** Import a JSON payload atomically. The previous value is untouched on error. */
       function importConfig(storage, text, target = null) {
         const config = parseConfigText(text)
         saveConfig(storage, config, target)
         return config
       }
-      
+
       /** Restore the fresh-install configuration. */
       function resetConfig(storage, target = null) {
         return saveConfig(storage, createDefaultConfig(), target)
       }
-      
+
       function customEvent(target, name, detail) {
         try {
           const EventConstructor = target?.CustomEvent ?? globalThis.CustomEvent
@@ -2188,17 +2188,17 @@ window.__ModuleLoader__.load({
           // call loadConfig on their next render.
         }
       }
-      
+
       /** Notify same-window subscribers after a write. */
       function notifyConfigChanged(target, config) {
         customEvent(target, CONFIG_EVENT, { config })
       }
-      
+
       /** Notify same-window subscribers after a catalog snapshot write. */
       function notifyCatalogChanged(target, models) {
         customEvent(target, CATALOG_EVENT, { models })
       }
-      
+
       /** Subscribe to same-window and cross-window config writes. */
       function subscribeConfig(target, listener) {
         if (!target?.addEventListener) return () => {}
@@ -2218,7 +2218,7 @@ window.__ModuleLoader__.load({
           target.removeEventListener(CONFIG_EVENT, onCustom)
         }
       }
-      
+
       /** Read the cached catalog snapshot; an absent or malformed cache is empty. */
       function loadCatalogResult(storage) {
         const text = readText(storage, CATALOG_KEY)
@@ -2251,12 +2251,12 @@ window.__ModuleLoader__.load({
           return { models: [], updatedAt: 0, error }
         }
       }
-      
+
       /** Read just the cached models. */
       function loadCatalog(storage) {
         return loadCatalogResult(storage).models
       }
-      
+
       /** Persist the last observed catalog for the settings page. */
       function saveCatalog(storage, models, target = null) {
         const snapshot = toCatalogSnapshot(Array.isArray(models) ? models : []).slice(0, MAX_CATALOG_MODELS)
@@ -2269,7 +2269,7 @@ window.__ModuleLoader__.load({
         if (target) notifyCatalogChanged(target, snapshot)
         return payload
       }
-      
+
       /** Subscribe to same-window and cross-window catalog snapshots. */
       function subscribeCatalog(target, listener) {
         if (!target?.addEventListener) return () => {}
@@ -2288,7 +2288,7 @@ window.__ModuleLoader__.load({
           target.removeEventListener(CATALOG_EVENT, onCustom)
         }
       }
-      
+
       /** True when an imported config carries a model key that no longer exists. */
       function missingModelKeys(config, catalog) {
         const available = new Set((catalog ?? []).map((model) => model.key))
@@ -2304,9 +2304,9 @@ window.__ModuleLoader__.load({
     }
     __defs["src/i18n.js"] = () => {
       /** Locale namespace and dictionaries for the Client half. */
-      
+
       const NS = 'dsh-toolbox'
-      
+
       /** Simplified Chinese is the key-set source of truth. */
       const zh = {
         'meta.title': 'DSH Toolbox',
@@ -2338,6 +2338,8 @@ window.__ModuleLoader__.load({
         'status.compat': '已检测到 dsh-model-search，复用它的搜索框。',
         'action.openSettings': '打开分组设置',
         'action.retry': '重试',
+        'workspace.flatToggle.enable': '切换到单列表',
+        'workspace.flatToggle.restore': '恢复之前的视图',
         'diagnostic.unrecognized': '未识别当前模型菜单结构，已保留原生菜单。',
         'settings.tab': 'DSH Toolbox',
         'settings.tabs.aria': 'DSH Toolbox 功能页签',
@@ -2403,7 +2405,7 @@ window.__ModuleLoader__.load({
         'settings.missing.one': '清理',
         'settings.emptyCatalog': '模型目录还是空的。打开一次模型选择器后再回来。',
         'settings.saved': '配置已保存',
-      
+
         // Request identity rewrite
         'identity.title': '请求身份改写',
         'identity.cardTitle': '身份规则',
@@ -2466,7 +2468,7 @@ window.__ModuleLoader__.load({
         'identity.fieldError.invalid-header-value': '请求头值过长或包含控制字符。',
         'identity.fieldError.too-many-headers': '自定义请求头数量超出上限。',
       }
-      
+
       /** English dictionary. */
       const en = {
         'meta.title': 'DSH Toolbox',
@@ -2498,6 +2500,8 @@ window.__ModuleLoader__.load({
         'status.compat': 'dsh-model-search detected; its search box is reused.',
         'action.openSettings': 'Open group settings',
         'action.retry': 'Retry',
+        'workspace.flatToggle.enable': 'Switch to one list',
+        'workspace.flatToggle.restore': 'Restore previous view',
         'diagnostic.unrecognized': 'The model menu structure was not recognized; the native menu remains in place.',
         'settings.tab': 'DSH Toolbox',
         'settings.tabs.aria': 'DSH Toolbox feature tabs',
@@ -2563,7 +2567,7 @@ window.__ModuleLoader__.load({
         'settings.missing.one': 'Remove',
         'settings.emptyCatalog': 'The catalog is empty. Open the model picker once and return here.',
         'settings.saved': 'Configuration saved',
-      
+
         // Request identity rewrite
         'identity.title': 'Request identity rewrite',
         'identity.cardTitle': 'Identity rules',
@@ -2626,19 +2630,19 @@ window.__ModuleLoader__.load({
         'identity.fieldError.invalid-header-value': 'Header value is too long or contains control characters.',
         'identity.fieldError.too-many-headers': 'Too many custom headers.',
       }
-      
+
       /** Pick a dictionary for a locale id such as `zh`, `zh-CN`, or `en-US`. */
       function dictionaryFor(locale) {
         return String(locale ?? '').toLowerCase().startsWith('zh') ? zh : en
       }
-      
+
       /** Interpolate `{name}` placeholders without treating values as HTML. */
       function interpolate(template, params = {}) {
         return String(template ?? '').replace(/\{(\w+)\}/gu, (match, key) =>
           Object.hasOwn(params, key) ? String(params[key]) : match,
         )
       }
-      
+
       /** Create a tiny translator for tests or for a missing locale service. */
       function createTranslator(locale = 'zh') {
         const dict = dictionaryFor(locale)
@@ -2652,9 +2656,9 @@ window.__ModuleLoader__.load({
        * All visual additions are namespaced. The host's own model rows are never
        * restyled, only hidden or shown with the `data-dsh-toolbox-hidden` attribute.
        */
-      
+
       const STYLE_ID = 'dsh-toolbox-styles'
-      
+
       const css = String.raw`
       .dsh-toolbox-toolbar {
         display: flex;
@@ -2874,7 +2878,7 @@ window.__ModuleLoader__.load({
         font-variant-numeric: tabular-nums;
       }
       [data-dsh-toolbox-hidden="true"] { display: none !important; }
-      
+
       /* Settings tab */
       .dsh-toolbox-settings {
         box-sizing: border-box;
@@ -3218,7 +3222,7 @@ window.__ModuleLoader__.load({
       @media (prefers-reduced-motion: reduce) {
         .dsh-toolbox-switch, .dsh-toolbox-switch::after { transition: none; }
       }
-      
+
       /* ---- Request identity rewrite ------------------------------------------ */
       .dsh-toolbox-identity-body {
         display: flex;
@@ -3362,23 +3366,103 @@ window.__ModuleLoader__.load({
         align-items: flex-start;
         gap: 8px;
       }
+
+      /* Native workspace header shortcut. The host header contains two 28px
+         controls; this attribute gives the third control room without changing the
+         host's search-expanded hiding behavior. */
+      [data-dsh-toolbox-workspace-flat-host="true"] {
+        max-width: 92px !important;
+      }
+      [data-dsh-toolbox-workspace-flat-host-hidden="true"] {
+        max-width: 0 !important;
+        opacity: 0;
+        pointer-events: none;
+        visibility: hidden;
+        transform: translate(4px);
+      }
+      [data-dsh-toolbox-workspace-flat-toggle="true"] {
+        flex: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        padding: 0;
+        border: 0;
+        border-radius: var(--dsw-radius-sm, 5px);
+        background: transparent;
+        color: var(--dsw-alias-label-secondary, #6e7781);
+        cursor: pointer;
+      }
+      [data-dsh-toolbox-workspace-flat-toggle="true"]:hover,
+      [data-dsh-toolbox-workspace-flat-toggle="true"][data-active="true"] {
+        background: var(--dsw-alias-interactive-bg-hover, rgba(127, 127, 127, .12));
+        color: var(--dsw-alias-label-primary, #1f2328);
+      }
+      [data-dsh-toolbox-workspace-flat-toggle="true"]:focus-visible {
+        outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary, #4d8dff));
+        outline-offset: -2px;
+      }
+      [data-dsh-toolbox-workspace-flat-toggle="true"] svg {
+        display: block;
+      }
       `
-      
+
+
       /**
        * Insert the stylesheet once per document.
+       *
+       * The lease count lives on the DOM node rather than only in a module-local
+       * WeakMap. Client bundle reloads evaluate this module again while the old
+       * generation may still be mounted; a DOM-backed count keeps old cleanup from
+       * removing a stylesheet still leased by the new generation.
+       *
        * @param {Document} doc
        * @returns {() => void} cleanup
        */
+      const STYLE_LEASE_ATTRIBUTE = 'data-dsh-toolbox-style-leases'
+      const STYLE_OWNER_ATTRIBUTE = 'data-dsh-toolbox-style-owner'
+      const STYLE_OWNER = 'dsh-toolbox'
+      const OWNED_STYLE_SELECTOR = `style[${STYLE_OWNER_ATTRIBUTE}="${STYLE_OWNER}"]`
+
+      function styleLeaseCount(element) {
+        const value = Number.parseInt(element?.getAttribute?.(STYLE_LEASE_ATTRIBUTE) ?? '', 10)
+        return Number.isFinite(value) && value >= 0 ? value : 0
+      }
+
+      function findOwnedStyle(doc) {
+        return doc.querySelector?.(OWNED_STYLE_SELECTOR) ?? null
+      }
+
+      function createOwnedStyle(doc, useReservedId) {
+        const element = doc.createElement('style')
+        if (useReservedId) element.id = STYLE_ID
+        element.textContent = css
+        element.setAttribute(STYLE_OWNER_ATTRIBUTE, STYLE_OWNER)
+        element.setAttribute(STYLE_LEASE_ATTRIBUTE, '0')
+        doc.head.appendChild(element)
+        return element
+      }
+
       function installStyles(doc = globalThis.document) {
         if (!doc?.head) return () => {}
-        const existing = doc.getElementById?.(STYLE_ID)
-        if (existing) return () => {}
-        const element = doc.createElement('style')
-        element.id = STYLE_ID
+        const existing = findOwnedStyle(doc)
+        const element = existing ?? createOwnedStyle(doc, !doc.getElementById?.(STYLE_ID))
         element.textContent = css
-        doc.head.appendChild(element)
+        element.setAttribute(STYLE_OWNER_ATTRIBUTE, STYLE_OWNER)
+        element.setAttribute(STYLE_LEASE_ATTRIBUTE, String(styleLeaseCount(element) + 1))
+
+        let released = false
         return () => {
-          element.remove?.()
+          if (released) return
+          released = true
+          if (!element.isConnected || element.getAttribute?.(STYLE_OWNER_ATTRIBUTE) !== STYLE_OWNER) return
+          const leases = styleLeaseCount(element)
+          if (leases <= 1) {
+            element.remove?.()
+          } else {
+            element.setAttribute(STYLE_LEASE_ATTRIBUTE, String(leases - 1))
+          }
         }
       }
       return { installStyles, STYLE_ID, css }
@@ -3393,18 +3477,18 @@ window.__ModuleLoader__.load({
        * - Keep a single observer and remove every injected node/listener on close.
        * - When the host structure is unrecognized, leave the native menu untouched.
        */
-      
+
       const { MODEL_ROW_SELECTOR, catalogFingerprint, detectExternalSearch, findExternalSearchInput, findModelMenus, readExternalQuery, readModelCatalog } = __require("src/model-catalog.js")
       const { UNGROUPED_ID, VIEW_ALL, VIEW_PROVIDER, buildViewModel, setGroupCollapsed, sortGroups } = __require("src/model-groups.js")
       const { loadCatalog, loadConfig, saveCatalog, saveConfig, subscribeConfig } = __require("src/model-storage.js")
       const { installStyles } = __require("src/styles.js")
-      
+
       const HIDDEN = 'data-dsh-toolbox-hidden'
       const ORIGINAL_TABINDEX = 'data-dsh-toolbox-tabindex'
       const ORIGINAL_ARIA_HIDDEN = 'data-dsh-toolbox-aria-hidden'
       const TOOLBAR_CLASS = 'dsh-toolbox-toolbar'
       const STATUS_CLASS = 'dsh-toolbox-status'
-      
+
       function element(doc, tag, className, attributes = {}) {
         const node = doc.createElement(tag)
         if (className) node.className = className
@@ -3414,7 +3498,7 @@ window.__ModuleLoader__.load({
         }
         return node
       }
-      
+
       function createSvg(doc, paths, options = {}) {
         const namespace = 'http://www.w3.org/2000/svg'
         const svg = doc.createElementNS(namespace, 'svg')
@@ -3434,22 +3518,22 @@ window.__ModuleLoader__.load({
         }
         return svg
       }
-      
+
       function chevron(doc, down = true) {
         return createSvg(doc, [down ? 'M4 6.5 8 10l4-3.5' : 'M6.5 4 10 8l-3.5 4'], { width: '12', height: '12' })
       }
-      
+
       function gearIcon(doc) {
         return createSvg(doc, [
           'M8 6.2a1.8 1.8 0 1 0 0 3.6 1.8 1.8 0 0 0 0-3.6Z',
           'M8 2.2v1.4M8 12.4v1.4M2.2 8h1.4M12.4 8h1.4M3.9 3.9l1 1M11.1 11.1l1 1M12.1 3.9l-1 1M4.9 11.1l-1 1',
         ], { width: '15', height: '15' })
       }
-      
+
       function clearIcon(doc) {
         return createSvg(doc, ['M4 4l8 8M12 4l-8 8'], { width: '12', height: '12' })
       }
-      
+
       function directChild(parent, className) {
         if (!parent?.children) return null
         for (const child of parent.children) {
@@ -3457,28 +3541,28 @@ window.__ModuleLoader__.load({
         }
         return null
       }
-      
+
       function removeChildren(node) {
         if (!node) return
         while (node.firstChild) node.removeChild(node.firstChild)
       }
-      
+
       function connected(node, doc) {
         if (!node) return false
         if (typeof node.isConnected === 'boolean') return node.isConnected
         return doc?.documentElement?.contains?.(node) === true
       }
-      
+
       function isModelButton(node) {
         return node?.tagName === 'BUTTON' && node.getAttribute?.('role') === 'menuitemradio'
       }
-      
+
       function isOwnNode(node) {
         if (!node || node.nodeType !== 1) return false
         if (node.getAttribute?.('data-dsh-toolbox-injected') === 'true') return true
         return [...(node.classList ?? [])].some((name) => name.startsWith('dsh-toolbox-'))
       }
-      
+
       function isOwnContainer(node) {
         return (
           node?.classList?.contains?.(TOOLBAR_CLASS) === true ||
@@ -3487,7 +3571,7 @@ window.__ModuleLoader__.load({
           node?.classList?.contains?.('dsh-toolbox-search-row') === true
         )
       }
-      
+
       /** True for mutations caused by our own UI, so the observer does not self-trigger. */
       function isOwnMutation(mutation) {
         if (isOwnContainer(mutation.target)) return true
@@ -3497,7 +3581,7 @@ window.__ModuleLoader__.load({
         if (removed.length > 0 && removed.every(isOwnNode) && isOwnContainer(mutation.target)) return true
         return false
       }
-      
+
       /**
        * Show or hide a host node without changing its React ownership.
        * The original tabindex/aria-hidden values are restored on close.
@@ -3532,7 +3616,7 @@ window.__ModuleLoader__.load({
           }
         }
       }
-      
+
       /** Restore a node modified by setHidden. */
       function restoreNode(node) {
         if (!node) return
@@ -3546,7 +3630,7 @@ window.__ModuleLoader__.load({
           node.removeAttribute(ORIGINAL_ARIA_HIDDEN)
         }
       }
-      
+
       /**
        * Controller for one page. Create one, call start(), call stop() on dispose.
        */
@@ -3580,7 +3664,7 @@ window.__ModuleLoader__.load({
           this.refresh = this.refresh.bind(this)
           this.scan = this.scan.bind(this)
         }
-      
+
         /** Begin observing and enhance any currently open menu. */
         start() {
           if (this.started || !this.doc) return
@@ -3604,7 +3688,7 @@ window.__ModuleLoader__.load({
             }
           }
         }
-      
+
         /** Remove every enhancement and release the observer/listeners. */
         stop() {
           if (!this.started) return
@@ -3625,7 +3709,7 @@ window.__ModuleLoader__.load({
           this.styleCleanup?.()
           this.styleCleanup = null
         }
-      
+
         /** Update the translator after the host locale changes. */
         setTranslator(translate) {
           if (typeof translate !== 'function') return
@@ -3636,7 +3720,7 @@ window.__ModuleLoader__.load({
             this.refreshRecord(record)
           }
         }
-      
+
         /** Coalesce many React mutations into one scan. */
         schedule() {
           if (!this.started || this.scheduled) return
@@ -3647,7 +3731,7 @@ window.__ModuleLoader__.load({
             this.scan()
           })
         }
-      
+
         /** Find open model panes and make sure each one is enhanced. */
         scan() {
           if (!this.started || !this.doc) return
@@ -3669,7 +3753,7 @@ window.__ModuleLoader__.load({
           this.refresh()
           this.persistCatalog()
         }
-      
+
         /** Re-read every open menu and apply the current config. */
         refresh() {
           if (!this.started) return
@@ -3685,7 +3769,7 @@ window.__ModuleLoader__.load({
           }
           if (removed) this.schedule()
         }
-      
+
         /** Whether every node this record owns is still attached to the live menu. */
         recordIntact(record) {
           return (
@@ -3698,7 +3782,7 @@ window.__ModuleLoader__.load({
             connected(record.statusElement, this.doc)
           )
         }
-      
+
         /** Build the toolbar and state for one menu. */
         enhanceMenu(menu) {
           const existing = this.records.get(menu)
@@ -3713,7 +3797,7 @@ window.__ModuleLoader__.load({
           if (!parent) return null
           const catalog = readModelCatalog(menu)
           if (catalog.models.length === 0) return null
-      
+
           const external = detectExternalSearch(menu)
           const nativeInput = [...(parent.querySelectorAll?.('input[role="searchbox"]') ?? [])].find(
             (input) => !input.closest?.('.dsh-toolbox-toolbar'),
@@ -3747,10 +3831,10 @@ window.__ModuleLoader__.load({
             lastStatusSignature: '',
           }
           this.records.set(menu, record)
-      
+
           const toolbar = element(this.doc, 'div', TOOLBAR_CLASS)
           record.toolbar = toolbar
-      
+
           if (!external) {
             const searchRow = element(this.doc, 'div', 'dsh-toolbox-search-row')
             const wrap = element(this.doc, 'div', 'dsh-toolbox-search-wrap')
@@ -3785,7 +3869,7 @@ window.__ModuleLoader__.load({
               this.clearQuery(record)
             })
           }
-      
+
           const tabbar = element(this.doc, 'div', 'dsh-toolbox-row')
           const tabs = element(this.doc, 'div', 'dsh-toolbox-tabs', {
             role: 'toolbar',
@@ -3812,7 +3896,7 @@ window.__ModuleLoader__.load({
           record.tabsElement = tabs
           record.groupCollapseButton = groupCollapse
           record.manageButton = manage
-      
+
           this.addListener(record, groupCollapse, 'click', (event) => {
             event.preventDefault()
             event.stopPropagation()
@@ -3825,7 +3909,7 @@ window.__ModuleLoader__.load({
               this.refreshRecord(record)
             }
           })
-      
+
           this.addListener(record, tabs, 'click', (event) => {
             const tab = event.target?.closest?.('[data-group-id]')
             if (!tab || !tabs.contains(tab)) return
@@ -3845,12 +3929,12 @@ window.__ModuleLoader__.load({
             record.trigger = trigger
             this.addListener(record, trigger, 'keydown', (event) => this.handleTriggerKeyDown(record, event), true)
           }
-      
+
           const status = element(this.doc, 'div', STATUS_CLASS, { 'data-visible': 'false' })
           record.statusElement = status
           parent.insertBefore(toolbar, menu)
           parent.insertBefore(status, menu)
-      
+
           if (external) {
             this.bindExternalInput(record)
           } else if (nativeInput) {
@@ -3860,11 +3944,11 @@ window.__ModuleLoader__.load({
             this.focusBeforeHide(record, row)
             setHidden(row, true)
           }
-      
+
           this.refreshRecord(record)
           return record
         }
-      
+
         /** Recompute one record from the live DOM and the current config. */
         refreshRecord(record) {
           if (!record?.menu || !connected(record.menu, this.doc)) return
@@ -3892,7 +3976,7 @@ window.__ModuleLoader__.load({
           this.refreshStatus(record)
           this.updateClearButton(record)
         }
-      
+
         /** Providers that have a heading and at least one row in the current view. */
         visibleProviderIds(record) {
           const view = record.view
@@ -3906,7 +3990,7 @@ window.__ModuleLoader__.load({
           }
           return ids
         }
-      
+
         /**
          * On first render, expand only the provider that owns the selected model.
          * If that provider is not in the active view, expand the first visible one.
@@ -3923,7 +4007,7 @@ window.__ModuleLoader__.load({
           )
           record.providerCollapseInitialized = true
         }
-      
+
         /** Never leave every visible provider folded, which would look like an empty menu. */
         ensureVisibleProviderExpanded(record) {
           if (record.view?.searching) return
@@ -3933,7 +4017,7 @@ window.__ModuleLoader__.load({
             record.collapsedProviders.delete(visible[0])
           }
         }
-      
+
         refreshToolbarLabels(record) {
           if (record.searchInput) {
             record.searchInput.setAttribute('placeholder', this.t('search.placeholder'))
@@ -3946,7 +4030,7 @@ window.__ModuleLoader__.load({
           }
           record.tabsElement?.setAttribute('aria-label', this.t('tabs.custom'))
         }
-      
+
         /** Rebuild the tab row only when its labels, counts, or active tab change. */
         refreshTabs(record) {
           const view = record.view
@@ -3988,7 +4072,7 @@ window.__ModuleLoader__.load({
             record.tabsElement.appendChild(tab)
           }
         }
-      
+
         /** Keep the custom-group fold control in the tab bar in sync with the active view. */
         refreshGroupCollapse(record) {
           const node = record.groupCollapseButton
@@ -4007,7 +4091,7 @@ window.__ModuleLoader__.load({
           node.setAttribute('aria-label', this.t(collapsed ? 'view.expand' : 'view.collapse'))
           node.setAttribute('title', this.t(collapsed ? 'view.expand' : 'view.collapse'))
         }
-      
+
         /** Apply the active view/search to native rows without replacing them. */
         applyVisibility(record) {
           const view = record.view
@@ -4022,7 +4106,7 @@ window.__ModuleLoader__.load({
             !view.searching &&
             (view.activeKind === 'custom' || view.activeKind === UNGROUPED_ID)
           const providerFoldEnabled = !hideHeadings && !view.searching
-      
+
           for (const group of record.catalog.groups) {
             const matches = (group.models ?? []).filter((model) => view.visibleKeys.has(model.key))
             const collapsedProvider =
@@ -4051,13 +4135,13 @@ window.__ModuleLoader__.load({
                 providerFoldEnabled && matches.length > 0 ? 'true' : 'false'
             }
           }
-      
+
           if (record.nativeSearch) {
             this.focusBeforeHide(record, record.nativeSearch)
             setHidden(record.nativeSearch, true)
           }
         }
-      
+
         /** Add a collapse button and a count badge to a provider heading. */
         ensureHeadingControls(record, group) {
           const heading = group.heading
@@ -4109,7 +4193,7 @@ window.__ModuleLoader__.load({
           }
           return { toggle, badge }
         }
-      
+
         /** Toggle one provider's fold state; used by the heading and its chevron. */
         toggleProvider(record, providerId) {
           if (!providerId || record.view?.searching) return
@@ -4117,7 +4201,7 @@ window.__ModuleLoader__.load({
           else record.collapsedProviders.add(providerId)
           this.refreshRecord(record)
         }
-      
+
         /** Show the empty/collapsed state below the toolbar. */
         refreshStatus(record) {
           const node = record.statusElement
@@ -4150,7 +4234,7 @@ window.__ModuleLoader__.load({
           hintNode.textContent = hint
           node.append(titleNode, hintNode)
         }
-      
+
         /** A click on a tab changes only the current menu view, not the host model. */
         selectTab(record, id) {
           if (!id) return
@@ -4164,7 +4248,7 @@ window.__ModuleLoader__.load({
           }
           this.refreshRecord(record)
         }
-      
+
         /**
          * Move focus into the toolbox search before hiding the host's search row.
          * Hiding the focused native input would otherwise blur to <body>, and the
@@ -4178,7 +4262,7 @@ window.__ModuleLoader__.load({
             record.searchInput.focus?.()
           }
         }
-      
+
         /** Clear the toolbox search and restore the full list. */
         clearQuery(record) {
           record.query = ''
@@ -4188,12 +4272,12 @@ window.__ModuleLoader__.load({
           }
           this.refreshRecord(record)
         }
-      
+
         updateClearButton(record) {
           if (!record.clearButton) return
           record.clearButton.style.display = record.query.trim() === '' ? 'none' : ''
         }
-      
+
         /** Reuse a compatible `dsh-model-search` input when it is already installed. */
         bindExternalInput(record) {
           const input = findExternalSearchInput(record.menu)
@@ -4206,7 +4290,7 @@ window.__ModuleLoader__.load({
             this.schedule()
           })
         }
-      
+
         /** Move keyboard focus among visible native rows only. */
         handleKeyDown(record, event) {
           if (event?.defaultPrevented || event?.isComposing) return
@@ -4247,7 +4331,7 @@ window.__ModuleLoader__.load({
             }
           }
         }
-      
+
         /** Keyboard entry from the trigger, whose own handler would otherwise focus the hidden native search. */
         handleTriggerKeyDown(record, event) {
           if (event?.defaultPrevented || event?.isComposing) return
@@ -4273,7 +4357,7 @@ window.__ModuleLoader__.load({
           if (key === 'ArrowUp' || key === 'End') buttons[buttons.length - 1].focus?.()
           else buttons[0].focus?.()
         }
-      
+
         visibleButtons(record) {
           const buttons = []
           for (const model of record.catalog?.models ?? []) {
@@ -4286,7 +4370,7 @@ window.__ModuleLoader__.load({
           }
           return buttons
         }
-      
+
         moveFocus(record, key) {
           const buttons = this.visibleButtons(record)
           if (buttons.length === 0) return
@@ -4300,7 +4384,7 @@ window.__ModuleLoader__.load({
           }
           buttons[next]?.focus?.()
         }
-      
+
         /** Open the plugin's settings tab, closing the model menu first. */
         openSettings(record) {
           if (typeof this.options.openSettings !== 'function') return
@@ -4315,7 +4399,7 @@ window.__ModuleLoader__.load({
           }, 80)
           this.timers.add(timer)
         }
-      
+
         closeMenu(record) {
           const triggers = [...(this.doc.querySelectorAll?.('button[aria-haspopup="menu"][aria-expanded="true"]') ?? [])]
           const trigger = triggers.find((button) => /model|模型/i.test(button.getAttribute?.('aria-label') ?? button.textContent ?? ''))
@@ -4331,7 +4415,7 @@ window.__ModuleLoader__.load({
             // The menu will be cleaned up by the observer when the host closes it.
           }
         }
-      
+
         updateConfig(next) {
           try {
             if (typeof this.options.setConfig === 'function') {
@@ -4349,7 +4433,7 @@ window.__ModuleLoader__.load({
           }
           this.refresh()
         }
-      
+
         /** Save the catalog snapshot once per distinct catalog. */
         persistCatalog() {
           for (const record of this.records.values()) {
@@ -4366,12 +4450,12 @@ window.__ModuleLoader__.load({
             return
           }
         }
-      
+
         addListener(record, target, type, handler, capture = false) {
           target.addEventListener(type, handler, capture)
           record.listeners.push({ target, type, handler, capture })
         }
-      
+
         cleanupRecord(record) {
           for (const { target, type, handler, capture } of record.listeners ?? []) {
             target.removeEventListener?.(type, handler, capture)
@@ -4395,7 +4479,7 @@ window.__ModuleLoader__.load({
           record.catalog = null
           record.view = null
         }
-      
+
         warnOnce(key, message) {
           if (this.diagnosticOnce.has(key)) return
           this.diagnosticOnce.add(key)
@@ -4411,12 +4495,506 @@ window.__ModuleLoader__.load({
           }
         }
       }
-      
+
       /** Convenience factory used by the feature registry. */
       function createModelSelectorController(options) {
         return new ModelSelectorController(options)
       }
       return { createModelSelectorController, ModelSelectorController }
+    }
+    __defs["src/workspace-flat-toggle.js"] = () => {
+      /**
+       * Add a small shortcut next to the native workspace search button.
+       *
+       * The host workspace browser owns the real view store. This feature only
+       * discovers that public slot registration and calls its public store action;
+       * it never replaces the workspace slot or simulates a native menu click.
+       */
+
+      const { installStyles } = __require("src/styles.js")
+
+      const WORKSPACE_VIEW_PERSIST_KEY = 'dsh.workspace.view.v5'
+      const LAST_GROUPED_VIEW_KEY = 'dsh-toolbox:workspace-last-group-by:v1'
+      const WORKSPACE_FLAT_TOGGLE_ATTRIBUTE = 'data-dsh-toolbox-workspace-flat-toggle'
+      const WORKSPACE_FLAT_HOST_ATTRIBUTE = 'data-dsh-toolbox-workspace-flat-host'
+      const WORKSPACE_FLAT_HOST_HIDDEN_ATTRIBUTE = 'data-dsh-toolbox-workspace-flat-host-hidden'
+
+      const BUTTON_BINDING_KEY = '__dshToolboxWorkspaceFlatToggleBinding'
+      const DOCUMENT_OWNER_KEY = '__dshToolboxWorkspaceFlatToggleOwner'
+      const FLAT = 'flat'
+      const GROUPED = new Set(['workspace', 'workspace-tree'])
+
+      function safeStorage(windowObject, storage) {
+        if (storage !== undefined) return storage
+        try {
+          return windowObject?.localStorage ?? null
+        } catch {
+          return null
+        }
+      }
+
+      function readStorage(storage, key) {
+        if (!storage || typeof storage.getItem !== 'function') return null
+        try {
+          return storage.getItem(key)
+        } catch {
+          return null
+        }
+      }
+
+      function writeStorage(storage, key, value) {
+        if (!storage || typeof storage.setItem !== 'function') return false
+        try {
+          storage.setItem(key, value)
+          return true
+        } catch {
+          return false
+        }
+      }
+
+      function normalizeGroupBy(value) {
+        return value === FLAT || GROUPED.has(value) ? value : null
+      }
+
+      function readLastGroupedView(storage) {
+        const mode = normalizeGroupBy(readStorage(storage, LAST_GROUPED_VIEW_KEY))
+        return GROUPED.has(mode) ? mode : 'workspace'
+      }
+
+      function rememberGroupedView(storage, mode) {
+        const normalized = normalizeGroupBy(mode)
+        if (!GROUPED.has(normalized)) return false
+        writeStorage(storage, LAST_GROUPED_VIEW_KEY, normalized)
+        return true
+      }
+
+      function ariaLabel(node) {
+        return String(node?.getAttribute?.('aria-label') ?? node?.getAttribute?.('title') ?? '').trim()
+      }
+
+      const NATIVE_WORKSPACE_CLASSES = Object.freeze({
+        root: 'cIzfCa_root',
+        sectionHeader: 'cIzfCa_sectionHeader',
+        searchSlot: 'cIzfCa_searchSlot',
+        headerActions: 'cIzfCa_headerActions',
+      })
+
+      function hasClass(node, className) {
+        return node?.classList?.contains?.(className) === true
+      }
+
+      function isSearchButton(node) {
+        return /搜索会话|search sessions/i.test(ariaLabel(node))
+      }
+
+      function isViewOptionsButton(node) {
+        return /视图选项|view options/i.test(ariaLabel(node))
+      }
+
+      function directChildrenWithClass(parent, className) {
+        return [...(parent?.children ?? [])].filter((child) => hasClass(child, className))
+      }
+
+      function findNativeWorkspaceHeader(root) {
+        const headers = directChildrenWithClass(root, NATIVE_WORKSPACE_CLASSES.sectionHeader)
+        if (headers.length !== 1) return null
+        const header = headers[0]
+        const searchSlots = directChildrenWithClass(header, NATIVE_WORKSPACE_CLASSES.searchSlot)
+        const actionGroups = directChildrenWithClass(header, NATIVE_WORKSPACE_CLASSES.headerActions)
+        if (searchSlots.length !== 1 || actionGroups.length !== 1) return null
+        const searchButtons = [...(searchSlots[0].querySelectorAll?.('button') ?? [])].filter(isSearchButton)
+        const viewButtons = [...(actionGroups[0].querySelectorAll?.('button[aria-label]') ?? [])].filter(isViewOptionsButton)
+        if (searchButtons.length !== 1 || viewButtons.length !== 1) return null
+        // The native control can be wrapped by a tooltip/menu trigger. insertBefore
+        // requires a *direct* child of the action group, not the nested button.
+        let viewAnchor = viewButtons[0]
+        while (viewAnchor?.parentElement && viewAnchor.parentElement !== actionGroups[0]) {
+          viewAnchor = viewAnchor.parentElement
+        }
+        if (viewAnchor?.parentElement !== actionGroups[0]) return null
+        if (viewAnchor.querySelectorAll?.('button').length !== (viewAnchor === viewButtons[0] ? 0 : 1)) return null
+        const expanded = searchButtons[0].getAttribute?.('aria-expanded')
+        if (expanded !== 'true' && expanded !== 'false') return null
+        return {
+          root,
+          header,
+          searchSlot: searchSlots[0],
+          searchButton: searchButtons[0],
+          actions: actionGroups[0],
+          viewButton: viewButtons[0],
+          viewAnchor,
+        }
+      }
+
+      /**
+       * Find the one exact native workspace header for the checked host build.
+       * Multiple roots or incomplete/ambiguous headers are rejected so another
+       * panel cannot receive the shortcut by accident.
+       */
+      function findWorkspaceHeader(doc = globalThis.document) {
+        if (!doc?.querySelectorAll) return null
+        const roots = [...doc.querySelectorAll(`.${NATIVE_WORKSPACE_CLASSES.root}`)]
+        const candidates = roots.map(findNativeWorkspaceHeader).filter(Boolean)
+        return candidates.length === 1 ? candidates[0] : null
+      }
+
+      function createFlatListIcon(doc) {
+        const svg = doc.createElementNS('http://www.w3.org/2000/svg', 'svg')
+        svg.setAttribute('viewBox', '0 0 16 16')
+        svg.setAttribute('width', '16')
+        svg.setAttribute('height', '16')
+        svg.setAttribute('fill', 'none')
+        svg.setAttribute('stroke', 'currentColor')
+        svg.setAttribute('stroke-width', '1.5')
+        svg.setAttribute('stroke-linecap', 'round')
+        svg.setAttribute('aria-hidden', 'true')
+        for (const pathData of ['M6 3.5h7.5', 'M6 8h7.5', 'M6 12.5h7.5', 'M2.6 3.5h.01', 'M2.6 8h.01', 'M2.6 12.5h.01']) {
+          const path = doc.createElementNS('http://www.w3.org/2000/svg', 'path')
+          path.setAttribute('d', pathData)
+          svg.appendChild(path)
+        }
+        return svg
+      }
+
+      function nativeStoreFromEntry(entry) {
+        const handle = entry?.store
+        const spec = handle?.spec
+        if (
+          !handle ||
+          !spec ||
+          spec.persist !== WORKSPACE_VIEW_PERSIST_KEY ||
+          typeof spec.actions?.setGroupBy !== 'function' ||
+          typeof handle.create !== 'function'
+        ) {
+          return null
+        }
+        // The checked host wraps the generic defineStore handle with
+        // `create: () => viewInstance`. A generic handle has `create(scopeKey)` and
+        // would allocate a detached store (and another persistence subscription), so
+        // reject it without calling create twice.
+        if (handle.create.length !== 0) return null
+        try {
+          const instance = handle.create()
+          if (
+            typeof instance?.getSnapshot !== 'function' ||
+            typeof instance?.subscribe !== 'function' ||
+            typeof instance?.actions?.setGroupBy !== 'function'
+          ) {
+            return null
+          }
+          return { handle, instance }
+        } catch {
+          return null
+        }
+      }
+
+      /** Find the native view store registered by the host workspace browser. */
+      function findNativeWorkspaceViewStore(slots) {
+        if (typeof slots?.entriesOfSlot !== 'function') return null
+        try {
+          const entries = slots.entriesOfSlot('sidebar.workspaces')
+          if (!Array.isArray(entries)) return null
+          const matches = entries.map(nativeStoreFromEntry).filter(Boolean)
+          return matches.length === 1 ? matches[0] : null
+        } catch {
+          return null
+        }
+      }
+
+      class WorkspaceFlatToggleController {
+        constructor(options = {}) {
+          this.doc = options.document ?? globalThis.document ?? null
+          this.win = options.window ?? globalThis.window ?? null
+          this.storage = safeStorage(this.win, options.storage)
+          this.slots = options.slots ?? null
+          this.t = options.t ?? ((key) => key)
+          this.logger = options.logger ?? console
+          this.Observer = options.Observer ?? this.win?.MutationObserver ?? globalThis.MutationObserver
+          this.requestFrame = options.requestAnimationFrame ?? ((callback) => setTimeout(callback, 16))
+          this.cancelFrame = options.cancelAnimationFrame ?? ((handle) => clearTimeout(handle))
+          this.started = false
+          this.styleCleanup = null
+          this.lastGroupedView = readLastGroupedView(this.storage)
+          this.observer = null
+          this.slotUnsubscribe = null
+          this.storeUnsubscribe = null
+          this.store = null
+          this.storeHandle = null
+          this.button = null
+          this.boundButton = null
+          this.actions = null
+          this.scheduled = false
+          this.frameHandle = null
+          this.refresh = this.refresh.bind(this)
+          this.scan = this.scan.bind(this)
+          this.toggle = this.toggle.bind(this)
+        }
+
+        isOwner() {
+          return this.doc?.[DOCUMENT_OWNER_KEY] === this
+        }
+
+        claimOwnership() {
+          if (!this.doc) return false
+          const previous = this.doc[DOCUMENT_OWNER_KEY]
+          if (previous === this) return true
+          try {
+            this.doc[DOCUMENT_OWNER_KEY] = this
+          } catch {
+            return false
+          }
+          if (previous?.started && typeof previous.stop === 'function') {
+            try {
+              previous.stop()
+            } catch {
+              // A stale generation must not prevent the new owner from starting.
+            }
+          }
+          return true
+        }
+
+        releaseOwnership() {
+          if (this.isOwner()) delete this.doc[DOCUMENT_OWNER_KEY]
+        }
+
+        disposeSafely(disposer, label) {
+          if (typeof disposer !== 'function') return
+          try {
+            disposer()
+          } catch (error) {
+            this.logger?.warn?.(`[dsh-toolbox] ${label} cleanup failed`, error)
+          }
+        }
+
+        start() {
+          if (this.started || !this.doc || !this.claimOwnership()) return
+          this.started = true
+          this.styleCleanup = installStyles(this.doc)
+          if (typeof this.slots?.subscribe === 'function') {
+            try {
+              const unsubscribe = this.slots.subscribe('sidebar.workspaces', this.refresh)
+              this.slotUnsubscribe = typeof unsubscribe === 'function' ? unsubscribe : null
+            } catch (error) {
+              this.logger?.warn?.('[dsh-toolbox] workspace slot subscription unavailable', error)
+            }
+          }
+          const root = this.doc.body ?? this.doc.documentElement
+          if (typeof this.Observer === 'function' && root) {
+            this.observer = new this.Observer((mutations) => {
+              if (mutations.every((mutation) => mutation.type === 'attributes' && mutation.target === this.button)) return
+              this.schedule()
+            })
+            this.observer.observe(root, {
+              childList: true,
+              subtree: true,
+              attributes: true,
+              attributeFilter: ['aria-expanded', 'aria-label', 'class'],
+            })
+          }
+          this.bindNativeStore()
+          this.scan()
+        }
+
+        stop() {
+          if (!this.started) return
+          const owner = this.isOwner()
+          this.started = false
+          this.observer?.disconnect()
+          this.observer = null
+          this.disposeSafely(this.slotUnsubscribe, 'workspace slot subscription')
+          this.slotUnsubscribe = null
+          this.disposeSafely(this.storeUnsubscribe, 'native workspace store subscription')
+          this.storeUnsubscribe = null
+          this.store = null
+          this.storeHandle = null
+          this.disposeSafely(this.styleCleanup, 'workspace styles')
+          this.styleCleanup = null
+          if (this.frameHandle !== null) this.cancelFrame(this.frameHandle)
+          this.frameHandle = null
+          this.scheduled = false
+          if (owner) this.removeOwnButtons()
+          else {
+            this.unbindButton()
+            this.button = null
+            this.actions = null
+          }
+          if (owner) this.releaseOwnership()
+        }
+
+        setTranslator(translate) {
+          if (typeof translate !== 'function') return
+          this.t = translate
+          this.updateButton()
+        }
+
+        schedule() {
+          if (!this.started || !this.isOwner() || this.scheduled) return
+          this.scheduled = true
+          this.frameHandle = this.requestFrame(() => {
+            this.scheduled = false
+            this.frameHandle = null
+            this.refresh()
+          })
+        }
+
+        refresh() {
+          if (!this.started || !this.isOwner()) return
+          this.bindNativeStore()
+          this.scan()
+        }
+
+        bindNativeStore() {
+          if (!this.isOwner()) return
+          const candidate = findNativeWorkspaceViewStore(this.slots)
+          if (candidate?.handle === this.storeHandle && candidate.instance === this.store) return
+          this.disposeSafely(this.storeUnsubscribe, 'native workspace store subscription')
+          this.storeUnsubscribe = null
+          this.store = candidate?.instance ?? null
+          this.storeHandle = candidate?.handle ?? null
+          if (this.store) {
+            try {
+              const unsubscribe = this.store.subscribe(() => this.handleStoreChange())
+              if (typeof unsubscribe !== 'function') throw new TypeError('native workspace store subscribe did not return a disposer')
+              this.storeUnsubscribe = unsubscribe
+              this.handleStoreChange()
+            } catch (error) {
+              this.disposeSafely(this.storeUnsubscribe, 'native workspace store subscription')
+              this.storeUnsubscribe = null
+              this.logger?.warn?.('[dsh-toolbox] native workspace view store unavailable', error)
+              this.store = null
+              this.storeHandle = null
+            }
+          }
+        }
+
+        handleStoreChange() {
+          if (!this.started || !this.isOwner()) return
+          const mode = this.currentMode()
+          if (GROUPED.has(mode)) {
+            this.lastGroupedView = mode
+            rememberGroupedView(this.storage, mode)
+          }
+          this.updateButton()
+        }
+
+        currentMode() {
+          try {
+            return normalizeGroupBy(this.store?.getSnapshot?.()?.groupBy)
+          } catch {
+            return null
+          }
+        }
+
+        toggle(event) {
+          if (!this.started || !this.isOwner()) return
+          event?.preventDefault?.()
+          event?.stopPropagation?.()
+          const mode = this.currentMode()
+          if (!this.store || !mode || typeof this.store.actions?.setGroupBy !== 'function') return
+          try {
+            if (mode === FLAT) {
+              const restoreMode = GROUPED.has(this.lastGroupedView) ? this.lastGroupedView : readLastGroupedView(this.storage)
+              this.store.actions.setGroupBy(restoreMode)
+            } else {
+              this.lastGroupedView = mode
+              rememberGroupedView(this.storage, mode)
+              this.store.actions.setGroupBy(FLAT)
+            }
+          } catch (error) {
+            this.logger?.warn?.('[dsh-toolbox] workspace flat toggle failed', error)
+          }
+          this.updateButton()
+        }
+
+        createButton() {
+          const button = this.doc.createElement('button')
+          button.type = 'button'
+          button.className = 'dsh-toolbox-workspace-flat-toggle'
+          button.setAttribute(WORKSPACE_FLAT_TOGGLE_ATTRIBUTE, 'true')
+          button.appendChild(createFlatListIcon(this.doc))
+          this.bindButton(button)
+          return button
+        }
+
+        bindButton(button) {
+          if (!button || !this.isOwner()) return
+          const previousOwner = button[BUTTON_BINDING_KEY]
+          if (previousOwner && previousOwner !== this) previousOwner.unbindButton(button)
+          if (this.boundButton === button) return
+          this.unbindButton()
+          button.addEventListener?.('click', this.toggle)
+          button[BUTTON_BINDING_KEY] = this
+          this.boundButton = button
+        }
+
+        unbindButton(button = this.boundButton) {
+          if (!button) return
+          button.removeEventListener?.('click', this.toggle)
+          if (button[BUTTON_BINDING_KEY] === this) delete button[BUTTON_BINDING_KEY]
+          if (this.boundButton === button) this.boundButton = null
+        }
+
+        removeOwnButtons(keep = null) {
+          if (!this.isOwner()) return
+          if (this.boundButton && this.boundButton !== keep) this.unbindButton()
+          for (const node of [...(this.doc?.querySelectorAll?.(`[${WORKSPACE_FLAT_TOGGLE_ATTRIBUTE}="true"]`) ?? [])]) {
+            if (node === keep) continue
+            node[BUTTON_BINDING_KEY]?.unbindButton?.(node)
+            node.remove?.()
+          }
+          for (const host of [...(this.doc?.querySelectorAll?.(`[${WORKSPACE_FLAT_HOST_ATTRIBUTE}="true"], [${WORKSPACE_FLAT_HOST_HIDDEN_ATTRIBUTE}="true"]`) ?? [])]) {
+            if (host === keep?.parentElement) continue
+            host.removeAttribute?.(WORKSPACE_FLAT_HOST_ATTRIBUTE)
+            host.removeAttribute?.(WORKSPACE_FLAT_HOST_HIDDEN_ATTRIBUTE)
+          }
+          if (this.button && this.button !== keep) {
+            this.button = null
+            this.actions = null
+          }
+        }
+
+        scan() {
+          if (!this.started || !this.isOwner() || !this.doc) return
+          const header = findWorkspaceHeader(this.doc)
+          if (!header || !this.store || !this.currentMode()) {
+            this.removeOwnButtons()
+            return
+          }
+          let button = [...(header.actions.querySelectorAll?.(`[${WORKSPACE_FLAT_TOGGLE_ATTRIBUTE}="true"]`) ?? [])][0] ?? null
+          if (!button) button = this.createButton()
+          this.removeOwnButtons(button)
+          if (button.parentElement !== header.actions || button.nextElementSibling !== header.viewAnchor) {
+            header.actions.insertBefore(button, header.viewAnchor)
+          }
+          const expanded = header.searchButton.getAttribute?.('aria-expanded')
+          header.actions.removeAttribute(WORKSPACE_FLAT_HOST_ATTRIBUTE)
+          header.actions.removeAttribute(WORKSPACE_FLAT_HOST_HIDDEN_ATTRIBUTE)
+          if (expanded === 'true') {
+            header.actions.setAttribute(WORKSPACE_FLAT_HOST_HIDDEN_ATTRIBUTE, 'true')
+          } else if (expanded === 'false') {
+            header.actions.setAttribute(WORKSPACE_FLAT_HOST_ATTRIBUTE, 'true')
+          }
+          this.button = button
+          this.actions = header.actions
+          this.bindButton(button)
+          this.updateButton()
+        }
+
+        updateButton() {
+          if (!this.button || !this.isOwner()) return
+          const flat = this.currentMode() === FLAT
+          const label = this.t(flat ? 'workspace.flatToggle.restore' : 'workspace.flatToggle.enable')
+          this.button.setAttribute('aria-label', label)
+          this.button.setAttribute('title', label)
+          this.button.setAttribute('aria-pressed', flat ? 'true' : 'false')
+          this.button.dataset.active = flat ? 'true' : 'false'
+        }
+      }
+
+      function createWorkspaceFlatToggleController(options) {
+        return new WorkspaceFlatToggleController(options)
+      }
+      return { normalizeGroupBy, readLastGroupedView, rememberGroupedView, findWorkspaceHeader, findNativeWorkspaceViewStore, createWorkspaceFlatToggleController, WorkspaceFlatToggleController, WORKSPACE_VIEW_PERSIST_KEY, LAST_GROUPED_VIEW_KEY, WORKSPACE_FLAT_TOGGLE_ATTRIBUTE, WORKSPACE_FLAT_HOST_ATTRIBUTE, WORKSPACE_FLAT_HOST_HIDDEN_ATTRIBUTE }
     }
     __defs["src/settings-panel.js"] = () => {
       /**
@@ -4425,15 +5003,15 @@ window.__ModuleLoader__.load({
        * Implemented as a vanilla React component (using React.createElement) so that
        * it runs directly in the browser runtime without any compiler or bundle tool.
        */
-      
+
       const { addGroup, cleanGroupName, modelsByProvider, moveGroup, removeGroup, removeMissingModelKeys, renameGroup, reorderGroups, setGroupCollapsed, setGroupModels, toggleModelInGroup } = __require("src/model-groups.js")
       const { exportConfig, importConfig, loadCatalog, loadConfig, missingModelKeys, resetConfig, saveConfig, subscribeCatalog, subscribeConfig } = __require("src/model-storage.js")
       const { matchesQuery } = __require("src/model-groups.js")
       const { createIdentitySection } = __require("src/identity-client.js")
-      
+
       /** Which sub-page of the toolbox settings tab is showing. */
       const SETTINGS_TAB_KEY = 'dsh-toolbox:settings-tab:v1'
-      
+
       /** Read the remembered sub-page; anything unexpected falls back to groups. */
       function readSettingsTab(storage) {
         try {
@@ -4442,7 +5020,7 @@ window.__ModuleLoader__.load({
           return 'groups'
         }
       }
-      
+
       /** Remember the sub-page (best effort; storage may be unavailable). */
       function writeSettingsTab(storage, tab) {
         try {
@@ -4451,17 +5029,17 @@ window.__ModuleLoader__.load({
           // Losing the preference is harmless.
         }
       }
-      
+
       function createSettingsPanel(React) {
         const h = React.createElement
         const { useState, useEffect, useMemo, useCallback, useRef } = React
         const IdentitySection = createIdentitySection(React)
-      
+
         return function SettingsPanel(props) {
           const t = props.t ?? ((key, params) => key)
           const storage = props.storage ?? globalThis.localStorage ?? null
           const win = props.window ?? globalThis.window ?? globalThis
-      
+
           const [config, setConfig] = useState(() => loadConfig(storage))
           const configRef = useRef(config)
           const [catalog, setCatalog] = useState(() => loadCatalog(storage))
@@ -4475,17 +5053,17 @@ window.__ModuleLoader__.load({
           const [dropTargetGroupId, setDropTargetGroupId] = useState(null)
           const fileInputRef = useRef(null)
           const [activeTab, setActiveTab] = useState(() => readSettingsTab(storage))
-      
+
           useEffect(() => {
             writeSettingsTab(storage, activeTab)
           }, [storage, activeTab])
-      
+
           // Keep a ref in sync so a save never mutates React state from inside an
           // updater function (which runs during render in concurrent React).
           useEffect(() => {
             configRef.current = config
           }, [config])
-      
+
           // Keep state in sync with cross-component or cross-window updates
           useEffect(() => {
             if (!win) return
@@ -4501,7 +5079,7 @@ window.__ModuleLoader__.load({
               offCatalog()
             }
           }, [win])
-      
+
           const persistConfig = useCallback(
             (updater) => {
               const previous = configRef.current
@@ -4519,7 +5097,7 @@ window.__ModuleLoader__.load({
             },
             [storage, win, t],
           )
-      
+
           // Ensure selectedGroupId stays valid if groups change
           useEffect(() => {
             if (config.groups.length === 0) {
@@ -4528,28 +5106,28 @@ window.__ModuleLoader__.load({
               setSelectedGroupId(config.groups[0].id)
             }
           }, [config.groups, selectedGroupId])
-      
+
           const activeGroup = useMemo(() => {
             return config.groups.find((g) => g.id === selectedGroupId) || null
           }, [config.groups, selectedGroupId])
-      
+
           const staleKeys = useMemo(() => {
             // Without a catalog snapshot, every key would look stale. Wait until the
             // menu has been opened once before reporting missing models.
             if (catalog.length === 0) return []
             return missingModelKeys(config, catalog)
           }, [config, catalog])
-      
+
           // Filter catalog models by query
           const filteredModels = useMemo(() => {
             if (!modelSearch.trim()) return catalog
             return catalog.filter((m) => matchesQuery(m, modelSearch))
           }, [catalog, modelSearch])
-      
+
           const filteredProviders = useMemo(() => {
             return modelsByProvider(filteredModels)
           }, [filteredModels])
-      
+
           // Handlers
           const handleCreateGroup = (e) => {
             e?.preventDefault()
@@ -4563,34 +5141,34 @@ window.__ModuleLoader__.load({
             setNewGroupName('')
             setNotice({ kind: 'ok', message: t('settings.saved') })
           }
-      
+
           const handleDeleteGroup = (group) => {
             const confirmMsg = t('settings.groups.deleteConfirm', { name: group.name })
             if (win.confirm && !win.confirm(confirmMsg)) return
             persistConfig((prev) => removeGroup(prev, group.id))
             setNotice({ kind: 'ok', message: t('settings.saved') })
           }
-      
+
           const handleRenameGroup = (groupId, newName) => {
             persistConfig((prev) => renameGroup(prev, groupId, newName))
           }
-      
+
           const handleMoveGroup = (groupId, delta) => {
             persistConfig((prev) => ({
               ...prev,
               groups: moveGroup(prev.groups, groupId, delta),
             }))
           }
-      
+
           const handleToggleCollapse = (groupId, collapsed) => {
             persistConfig((prev) => setGroupCollapsed(prev, groupId, collapsed))
           }
-      
+
           const handleModelToggle = (modelKey) => {
             if (!activeGroup) return
             persistConfig((prev) => toggleModelInGroup(prev, activeGroup.id, modelKey))
           }
-      
+
           const handleBatchAdd = () => {
             if (!activeGroup) return
             const keysToAdd = filteredModels.map((m) => m.key)
@@ -4600,7 +5178,7 @@ window.__ModuleLoader__.load({
               return setGroupModels(prev, activeGroup.id, [...currentKeys])
             })
           }
-      
+
           const handleBatchRemove = () => {
             if (!activeGroup) return
             const keysToRemove = new Set(filteredModels.map((m) => m.key))
@@ -4609,28 +5187,28 @@ window.__ModuleLoader__.load({
               return setGroupModels(prev, activeGroup.id, nextKeys)
             })
           }
-      
+
           const handleRemoveStaleKeys = () => {
             const available = catalog.map((m) => m.key)
             persistConfig((prev) => removeMissingModelKeys(prev, available))
             setNotice({ kind: 'ok', message: t('settings.saved') })
           }
-      
+
           const handleModeChange = (e) => {
             const nextMode = e.target.value
             persistConfig((prev) => ({ ...prev, mode: nextMode }))
           }
-      
+
           const handleToggleUngrouped = (e) => {
             const checked = e.target.checked
             persistConfig((prev) => ({ ...prev, showUngrouped: checked }))
           }
-      
+
           const handleTogglePreserveProviders = (e) => {
             const checked = e.target.checked
             persistConfig((prev) => ({ ...prev, preserveProviderGroups: checked }))
           }
-      
+
           const handleExport = () => {
             const json = exportConfig(config)
             setImportText(json)
@@ -4639,7 +5217,7 @@ window.__ModuleLoader__.load({
             }
             setNotice({ kind: 'ok', message: t('settings.data.copied') })
           }
-      
+
           const handleDownload = () => {
             const json = exportConfig(config)
             try {
@@ -4654,7 +5232,7 @@ window.__ModuleLoader__.load({
               setNotice({ kind: 'error', message: String(err) })
             }
           }
-      
+
           const handleImport = () => {
             if (!importText.trim()) return
             try {
@@ -4669,7 +5247,7 @@ window.__ModuleLoader__.load({
               })
             }
           }
-      
+
           const handleFileImport = (e) => {
             const file = e.target?.files?.[0]
             if (!file) return
@@ -4698,7 +5276,7 @@ window.__ModuleLoader__.load({
             }
             reader.readAsText(file)
           }
-      
+
           const handleReset = () => {
             if (win.confirm && !win.confirm(t('settings.data.restoreConfirm'))) return
             try {
@@ -4713,20 +5291,20 @@ window.__ModuleLoader__.load({
               })
             }
           }
-      
+
           // Drag-and-drop group reordering
           const handleDragStart = (e, groupId) => {
             setDraggedGroupId(groupId)
             if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
           }
-      
+
           const handleDragOver = (e, targetGroupId) => {
             e.preventDefault()
             if (draggedGroupId && draggedGroupId !== targetGroupId) {
               setDropTargetGroupId(targetGroupId)
             }
           }
-      
+
           const handleDrop = (e, targetGroupId) => {
             e.preventDefault()
             if (draggedGroupId && draggedGroupId !== targetGroupId) {
@@ -4738,16 +5316,16 @@ window.__ModuleLoader__.load({
             setDraggedGroupId(null)
             setDropTargetGroupId(null)
           }
-      
+
           const handleDragEnd = () => {
             setDraggedGroupId(null)
             setDropTargetGroupId(null)
           }
-      
+
           return h(
             'div',
             { className: 'dsh-toolbox-settings', 'data-tab': activeTab },
-      
+
             // Header
             h(
               'div',
@@ -4777,7 +5355,7 @@ window.__ModuleLoader__.load({
                 h('p', { className: 'dsh-toolbox-muted' }, t('meta.description')),
               ),
             ),
-      
+
             // Sub-page tabs: model groups vs. request identity
             h(
               'div',
@@ -4809,12 +5387,12 @@ window.__ModuleLoader__.load({
                 t('settings.tabs.identity'),
               ),
             ),
-      
+
             // Page: model groups
             h(
               'div',
               { className: 'dsh-toolbox-settings-page', 'data-page': 'groups' },
-      
+
               // Notification bar
               notice
                 ? h(
@@ -4826,7 +5404,7 @@ window.__ModuleLoader__.load({
                     notice.message,
                   )
                 : null,
-      
+
               // Section 1: Catalog Status
               h(
                 'div',
@@ -4845,13 +5423,13 @@ window.__ModuleLoader__.load({
                   ? h('p', { className: 'dsh-toolbox-muted' }, t('settings.catalog.empty'))
                   : h('p', { className: 'dsh-toolbox-muted' }, t('settings.catalog.hint')),
               ),
-      
+
               // Section 2: Preferences / Opening Behavior
             h(
               'div',
               { className: 'dsh-toolbox-card' },
               h('div', { className: 'dsh-toolbox-card-head' }, h('h3', { className: 'dsh-toolbox-card-title' }, t('settings.prefs.title'))),
-      
+
               // Default view select
               h(
                 'div',
@@ -4873,7 +5451,7 @@ window.__ModuleLoader__.load({
                   h('option', { value: 'provider' }, t('settings.prefs.defaultView.provider')),
                 ),
               ),
-      
+
               // Show ungrouped switch
               h(
                 'div',
@@ -4890,7 +5468,7 @@ window.__ModuleLoader__.load({
                   onChange: handleToggleUngrouped,
                 }),
               ),
-      
+
               // Preserve provider headings switch
               h(
                 'div',
@@ -4908,7 +5486,7 @@ window.__ModuleLoader__.load({
                 }),
               ),
             ),
-      
+
             // Section 3: Custom Group Management
             h(
               'div',
@@ -4940,7 +5518,7 @@ window.__ModuleLoader__.load({
                   ),
                 ),
               ),
-      
+
               // Group cards list
               config.groups.length === 0
                 ? h('p', { className: 'dsh-toolbox-muted' }, t('settings.groups.empty'))
@@ -4951,7 +5529,7 @@ window.__ModuleLoader__.load({
                       const isSelected = group.id === selectedGroupId
                       const isDragging = group.id === draggedGroupId
                       const isDropTarget = group.id === dropTargetGroupId
-      
+
                       return h(
                         'div',
                         {
@@ -4962,7 +5540,7 @@ window.__ModuleLoader__.load({
                           onDragOver: (e) => handleDragOver(e, group.id),
                           onDrop: (e) => handleDrop(e, group.id),
                         },
-      
+
                         // Group head (draggable row)
                         h(
                           'div',
@@ -5053,7 +5631,7 @@ window.__ModuleLoader__.load({
                             t('settings.groups.delete'),
                           ),
                         ),
-      
+
                         // Group members assignment (shown if group is selected and expanded)
                         isSelected && !group.collapsed
                           ? h(
@@ -5091,7 +5669,7 @@ window.__ModuleLoader__.load({
                                   t('settings.groups.batchRemove'),
                                 ),
                               ),
-      
+
                               // Model checkbox grid grouped by provider
                               filteredProviders.length === 0
                                 ? h('p', { className: 'dsh-toolbox-muted' }, t('settings.groups.noModels'))
@@ -5134,7 +5712,7 @@ window.__ModuleLoader__.load({
                     }),
                   ),
             ),
-      
+
             // Section 4: Stale Model Keys Warning & Cleanup
             staleKeys.length > 0
               ? h(
@@ -5171,7 +5749,7 @@ window.__ModuleLoader__.load({
                   ),
                 )
               : null,
-      
+
             // Section 5: Data Export / Import / Reset
             h(
               'div',
@@ -5254,7 +5832,7 @@ window.__ModuleLoader__.load({
               ),
             ),
             ),
-      
+
             // Page: request identity rewrite (host fetch patch)
             h(
               'div',
@@ -5271,14 +5849,16 @@ window.__ModuleLoader__.load({
        * DSH Toolbox feature registry.
        *
        * Each feature owns one capability and can be added without touching the
-       * feature's neighbours. Today the registry contains model groups/search; a
-       * message editing or rollback feature can be appended in a later phase.
+       * feature's neighbours. Today the registry contains workspace flat-list
+       * switching and model groups/search; a message editing or rollback feature
+       * can be appended in a later phase.
        */
-      
+
       const { createModelSelectorController } = __require("src/model-selector.js")
+      const { createWorkspaceFlatToggleController } = __require("src/workspace-flat-toggle.js")
       const { createSettingsPanel } = __require("src/settings-panel.js")
       const { NS, en, zh } = __require("src/i18n.js")
-      
+
       /**
        * Best-effort navigation from the model menu to Settings → Plugins → DSH
        * Toolbox. This only clicks visible host controls; it never calls a private
@@ -5291,7 +5871,7 @@ window.__ModuleLoader__.load({
         if (existing) {
           return selectToolboxTab(existing)
         }
-      
+
         const triggers = [...(doc.querySelectorAll?.('button[aria-haspopup="dialog"]') ?? [])]
         const settingsTrigger = triggers.find((button) => {
           const label = button.getAttribute?.('aria-label') || button.getAttribute?.('title') || button.textContent || ''
@@ -5299,7 +5879,7 @@ window.__ModuleLoader__.load({
         })
         if (!settingsTrigger) return false
         settingsTrigger.click?.()
-      
+
         const start = Date.now()
         const tick = () => {
           const dialog = doc.querySelector?.('div[role="dialog"][data-shortcut-modal="settings"]')
@@ -5314,7 +5894,7 @@ window.__ModuleLoader__.load({
         setTimeout(tick, 50)
         return true
       }
-      
+
       /** Click the Plugins navigation entry and then the DSH Toolbox tab. */
       function selectToolboxTab(dialog) {
         const nav = [...(dialog.querySelectorAll?.('nav button') ?? [])]
@@ -5334,10 +5914,33 @@ window.__ModuleLoader__.load({
         setTimeout(tick, 40)
         return true
       }
-      
+
       /**
-       * Feature 1: searchable model picker with persistent custom groups.
+       * Shortcut for toggling the native workspace browser into one flat list.
        */
+      const workspaceFlatToggleFeature = {
+        id: 'workspace-flat-toggle',
+        name: 'Workspace flat-list toggle',
+        description: 'Toggle the native workspace browser between one list and the previous grouped view.',
+        inject: ['slots', 'locale'],
+        defaultEnabled: true,
+
+        apply(ctx, helpers) {
+          const doc = typeof document !== 'undefined' ? document : null
+          const win = typeof window !== 'undefined' ? window : null
+          const controller = createWorkspaceFlatToggleController({
+            document: doc,
+            window: win,
+            slots: ctx.slots,
+            t: helpers.t,
+            logger: ctx.logger ?? console,
+          })
+          helpers.workspaceFlatToggle = controller
+          if (doc) controller.start()
+          return () => controller.stop()
+        },
+      }
+
       const modelGroupsFeature = {
         id: 'model-groups',
         name: 'Model groups and search',
@@ -5349,13 +5952,13 @@ window.__ModuleLoader__.load({
           version: 1,
           keys: ['version', 'mode', 'groups', 'showUngrouped', 'preserveProviderGroups'],
         },
-      
+
         apply(ctx, helpers) {
           const doc = typeof document !== 'undefined' ? document : null
           const win = typeof window !== 'undefined' ? window : null
           const storage = typeof localStorage !== 'undefined' ? localStorage : null
           const t = helpers.t
-      
+
           const controller = createModelSelectorController({
             document: doc,
             window: win,
@@ -5366,7 +5969,7 @@ window.__ModuleLoader__.load({
           })
           helpers.controller = controller
           if (doc) controller.start()
-      
+
           let slotDisposer = null
           if (helpers.React && ctx.slots?.inject) {
             const SettingsView = createSettingsPanel(helpers.React)
@@ -5390,7 +5993,7 @@ window.__ModuleLoader__.load({
               ),
             )
           }
-      
+
           return () => {
             try {
               if (typeof slotDisposer === 'function') slotDisposer()
@@ -5401,10 +6004,10 @@ window.__ModuleLoader__.load({
           }
         },
       }
-      
+
       /** Active features. Append `messageEditFeature` here in phase 2. */
-      const features = [modelGroupsFeature]
-      
+      const features = [modelGroupsFeature, workspaceFlatToggleFeature]
+
       /**
        * Build the plugin face consumed by the Web module factory.
        * @param {{ React: object }} runtime
@@ -5415,9 +6018,11 @@ window.__ModuleLoader__.load({
           apply(ctx) {
             const t = ctx.locale.bind(NS)
             ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-toolbox: locale dictionaries')
-            const helpers = { React, t, ctx, controller: null }
+            const helpers = { React, t, ctx, controller: null, workspaceFlatToggle: null }
             const offLocale = ctx.locale.subscribe(() => {
-              helpers.controller?.setTranslator(ctx.locale.bind(NS))
+              const nextTranslator = ctx.locale.bind(NS)
+              helpers.controller?.setTranslator(nextTranslator)
+              helpers.workspaceFlatToggle?.setTranslator(nextTranslator)
             })
             ctx.effect(
               () => () => {
@@ -5425,7 +6030,7 @@ window.__ModuleLoader__.load({
               },
               'dsh-toolbox: locale subscription',
             )
-      
+
             const cleanups = []
             for (const feature of features) {
               try {
@@ -5451,7 +6056,7 @@ window.__ModuleLoader__.load({
           features,
         }
       }
-      return { navigateToToolboxSettings, createToolbox, modelGroupsFeature, features }
+      return { navigateToToolboxSettings, createToolbox, workspaceFlatToggleFeature, modelGroupsFeature, features }
     }
     const { createToolbox } = __require('src/features.js')
     const toolbox = createToolbox({ React })

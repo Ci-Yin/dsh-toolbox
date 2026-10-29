@@ -712,22 +712,102 @@ export const css = String.raw`
   align-items: flex-start;
   gap: 8px;
 }
+
+/* Native workspace header shortcut. The host header contains two 28px
+   controls; this attribute gives the third control room without changing the
+   host's search-expanded hiding behavior. */
+[data-dsh-toolbox-workspace-flat-host="true"] {
+  max-width: 92px !important;
+}
+[data-dsh-toolbox-workspace-flat-host-hidden="true"] {
+  max-width: 0 !important;
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+  transform: translate(4px);
+}
+[data-dsh-toolbox-workspace-flat-toggle="true"] {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--dsw-radius-sm, 5px);
+  background: transparent;
+  color: var(--dsw-alias-label-secondary, #6e7781);
+  cursor: pointer;
+}
+[data-dsh-toolbox-workspace-flat-toggle="true"]:hover,
+[data-dsh-toolbox-workspace-flat-toggle="true"][data-active="true"] {
+  background: var(--dsw-alias-interactive-bg-hover, rgba(127, 127, 127, .12));
+  color: var(--dsw-alias-label-primary, #1f2328);
+}
+[data-dsh-toolbox-workspace-flat-toggle="true"]:focus-visible {
+  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary, #4d8dff));
+  outline-offset: -2px;
+}
+[data-dsh-toolbox-workspace-flat-toggle="true"] svg {
+  display: block;
+}
 `
+
 
 /**
  * Insert the stylesheet once per document.
+ *
+ * The lease count lives on the DOM node rather than only in a module-local
+ * WeakMap. Client bundle reloads evaluate this module again while the old
+ * generation may still be mounted; a DOM-backed count keeps old cleanup from
+ * removing a stylesheet still leased by the new generation.
+ *
  * @param {Document} doc
  * @returns {() => void} cleanup
  */
+const STYLE_LEASE_ATTRIBUTE = 'data-dsh-toolbox-style-leases'
+const STYLE_OWNER_ATTRIBUTE = 'data-dsh-toolbox-style-owner'
+const STYLE_OWNER = 'dsh-toolbox'
+const OWNED_STYLE_SELECTOR = `style[${STYLE_OWNER_ATTRIBUTE}="${STYLE_OWNER}"]`
+
+function styleLeaseCount(element) {
+  const value = Number.parseInt(element?.getAttribute?.(STYLE_LEASE_ATTRIBUTE) ?? '', 10)
+  return Number.isFinite(value) && value >= 0 ? value : 0
+}
+
+function findOwnedStyle(doc) {
+  return doc.querySelector?.(OWNED_STYLE_SELECTOR) ?? null
+}
+
+function createOwnedStyle(doc, useReservedId) {
+  const element = doc.createElement('style')
+  if (useReservedId) element.id = STYLE_ID
+  element.textContent = css
+  element.setAttribute(STYLE_OWNER_ATTRIBUTE, STYLE_OWNER)
+  element.setAttribute(STYLE_LEASE_ATTRIBUTE, '0')
+  doc.head.appendChild(element)
+  return element
+}
+
 export function installStyles(doc = globalThis.document) {
   if (!doc?.head) return () => {}
-  const existing = doc.getElementById?.(STYLE_ID)
-  if (existing) return () => {}
-  const element = doc.createElement('style')
-  element.id = STYLE_ID
+  const existing = findOwnedStyle(doc)
+  const element = existing ?? createOwnedStyle(doc, !doc.getElementById?.(STYLE_ID))
   element.textContent = css
-  doc.head.appendChild(element)
+  element.setAttribute(STYLE_OWNER_ATTRIBUTE, STYLE_OWNER)
+  element.setAttribute(STYLE_LEASE_ATTRIBUTE, String(styleLeaseCount(element) + 1))
+
+  let released = false
   return () => {
-    element.remove?.()
+    if (released) return
+    released = true
+    if (!element.isConnected || element.getAttribute?.(STYLE_OWNER_ATTRIBUTE) !== STYLE_OWNER) return
+    const leases = styleLeaseCount(element)
+    if (leases <= 1) {
+      element.remove?.()
+    } else {
+      element.setAttribute(STYLE_LEASE_ATTRIBUTE, String(leases - 1))
+    }
   }
 }
