@@ -414,3 +414,61 @@ test('the mutation observer does not rescan on its own injected nodes', async ()
   assert.equal(scans, settled)
   controller.stop()
 })
+
+test('provider rows are indented under their provider label', () => {
+  const { dom, controller } = setup()
+  const { window } = dom
+  const document = window.document
+  const menu = document.querySelector('#menu-models')
+
+  // jsdom has no layout: fake the host geometry. The heading content starts at
+  // 24, the injected disclosure button occupies 24..42 (+5 margin) which puts
+  // the label at 47, while model names sit at 30 — the screenshot's 30/47 zigzag.
+  const rect = (left, width) => ({ left, right: left + width, top: 0, bottom: 20, width, height: 20, x: left, y: 0 })
+  window.Element.prototype.getBoundingClientRect = function getRect() {
+    if (this === menu) return rect(0, 260)
+    if (this.classList?.contains('dsh-toolbox-group-toggle')) return rect(24, 18)
+    if (this.matches?.('[data-menu-group-heading]')) return rect(24, 240)
+    if (this.matches?.('button[role="menuitemradio"]')) return rect(8, 240)
+    if (this.matches?.('[data-provider-id]')) {
+      // The label really moves with the row, so the measured indent converges.
+      const applied = Number(this.closest('button')?.dataset.dshToolboxIndent ?? 0)
+      return rect(30 + applied, 120)
+    }
+    return rect(0, 0)
+  }
+  window.getComputedStyle = (node) => ({
+    marginRight: node.classList?.contains('dsh-toolbox-group-toggle') ? '5px' : '0px',
+    columnGap: 'normal',
+    paddingLeft: node.matches?.('button[role="menuitemradio"]') ? '22px' : '0px',
+  })
+
+  controller.start()
+  document.querySelector('[data-group-id="all"]').click()
+
+  const sections = [...document.querySelectorAll('[data-menu-group]')]
+  const deepseekRows = [...sections[0].querySelectorAll('button[role="menuitemradio"]')]
+  for (const row of deepseekRows) {
+    assert.equal(row.style.paddingLeft, '39px') // 22 host padding + 17 to reach the label column
+    assert.equal(row.dataset.dshToolboxIndent, '17')
+  }
+
+  // A folded provider indents its rows once it opens.
+  sections[1].querySelector('[data-menu-group-heading]').click()
+  const openaiRows = [...sections[1].querySelectorAll('button[role="menuitemradio"]')]
+  for (const row of openaiRows) assert.equal(row.style.paddingLeft, '39px')
+
+  // Re-running converges instead of stacking another indent on top.
+  controller.refresh()
+  for (const row of deepseekRows) assert.equal(row.style.paddingLeft, '39px')
+
+  // A view that hides the provider headings drops the indent again.
+  document.querySelector('[data-group-id="favorites"]').click()
+  for (const row of deepseekRows) assert.equal(row.style.paddingLeft, '22px')
+
+  controller.stop()
+  for (const row of deepseekRows) {
+    assert.equal(row.style.paddingLeft, '')
+    assert.equal(row.hasAttribute('data-dsh-toolbox-indent'), false)
+  }
+})
