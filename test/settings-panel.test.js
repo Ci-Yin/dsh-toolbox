@@ -56,8 +56,11 @@ test('settings panel renders the group editor with the cached catalog', () => {
   assert.match(html, /DeepSeek Chat/)
   assert.match(html, /GPT-4o/)
   assert.match(html, /加入全部结果/)
-  assert.match(html, /配置数据/)
-  assert.match(html, /导入 JSON/)
+  const groupsPage = html.slice(html.indexOf('data-page="groups"'), html.indexOf('data-page="identity"'))
+  const otherPage = html.slice(html.indexOf('data-page="other"'))
+  assert.doesNotMatch(groupsPage, /配置数据/)
+  assert.match(otherPage, /配置数据/)
+  assert.match(otherPage, /导入 JSON/)
 })
 
 test('settings panel tells the user how to populate an empty catalog', () => {

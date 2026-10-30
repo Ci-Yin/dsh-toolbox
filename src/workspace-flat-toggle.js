@@ -17,7 +17,8 @@ export const WORKSPACE_FLAT_HOST_HIDDEN_ATTRIBUTE = 'data-dsh-toolbox-workspace-
 const BUTTON_BINDING_KEY = '__dshToolboxWorkspaceFlatToggleBinding'
 const DOCUMENT_OWNER_KEY = '__dshToolboxWorkspaceFlatToggleOwner'
 const FLAT = 'flat'
-const GROUPED = new Set(['workspace', 'workspace-tree'])
+export const GROUPED_VIEW_MODES = Object.freeze(['workspace', 'workspace-tree'])
+const GROUPED = new Set(GROUPED_VIEW_MODES)
 
 function safeStorage(windowObject, storage) {
   if (storage !== undefined) return storage
@@ -388,7 +389,11 @@ export class WorkspaceFlatToggleController {
     if (!this.store || !mode || typeof this.store.actions?.setGroupBy !== 'function') return
     try {
       if (mode === FLAT) {
-        const restoreMode = GROUPED.has(this.lastGroupedView) ? this.lastGroupedView : readLastGroupedView(this.storage)
+        const storedMode = normalizeGroupBy(readStorage(this.storage, LAST_GROUPED_VIEW_KEY))
+        const restoreMode = GROUPED.has(storedMode)
+          ? storedMode
+          : GROUPED.has(this.lastGroupedView) ? this.lastGroupedView : 'workspace'
+        this.lastGroupedView = restoreMode
         this.store.actions.setGroupBy(restoreMode)
       } else {
         this.lastGroupedView = mode

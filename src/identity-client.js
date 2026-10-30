@@ -154,6 +154,7 @@ export function createIdentitySection(React) {
   return function IdentitySection(props) {
     const t = props.t ?? ((key) => key)
     const win = props.win ?? globalThis
+    const refreshToken = props.refreshToken ?? 0
 
     const api = useMemo(() => createIdentityApi(win), [win])
 
@@ -207,23 +208,27 @@ export function createIdentitySection(React) {
 
     useEffect(() => {
       load()
-    }, [load])
+    }, [load, refreshToken])
 
     const commit = useCallback(
-      async (nextValue, successMessage) => {
+      async (nextValue, successMessage, options = {}) => {
         if (snapshot === null) return false
         setBusy(true)
         try {
           const body = await api.save(nextValue, snapshot.revision)
           acceptSnapshot(body)
           const dropped = Array.isArray(body?.droppedHeaders) ? body.droppedHeaders : []
-          setNotice({
-            kind: 'ok',
-            message:
-              dropped.length > 0
-                ? t('identity.droppedHeaders', { names: dropped.join(', ') })
-                : successMessage ?? t('settings.saved'),
-          })
+          if (!options.silentSuccess) {
+            setNotice({
+              kind: 'ok',
+              message:
+                dropped.length > 0
+                  ? t('identity.droppedHeaders', { names: dropped.join(', ') })
+                  : successMessage ?? t('settings.saved'),
+            })
+          } else {
+            setNotice(null)
+          }
           setFieldErrors({})
           return true
         } catch (error) {
@@ -606,10 +611,11 @@ export function createIdentitySection(React) {
           ? h('input', {
               type: 'checkbox',
               className: 'dsh-toolbox-switch',
+              'data-feature': 'identity',
               checked: value.enabled,
               disabled: busy,
               title: t('identity.enable'),
-              onChange: () => commit({ ...value, enabled: !value.enabled }),
+              onChange: () => commit({ ...value, enabled: !value.enabled }, undefined, { silentSuccess: true }),
             })
           : null,
       ),
@@ -650,7 +656,7 @@ export function createIdentitySection(React) {
           )
         : null,
 
-      ready
+      ready && value.enabled
         ? h(
             'div',
             { className: 'dsh-toolbox-identity-body' },

@@ -19,38 +19,39 @@ import {
   toggleModelInGroup,
 } from './model-groups.js'
 import {
-  exportConfig,
-  importConfig,
   loadCatalog,
   loadConfig,
   missingModelKeys,
-  resetConfig,
   saveConfig,
   subscribeCatalog,
   subscribeConfig,
 } from './model-storage.js'
 import { matchesQuery } from './model-groups.js'
 import { createIdentitySection } from './identity-client.js'
+import {
+  exportToolboxData,
+  importToolboxData,
+  resetToolboxData,
+  ToolboxDataError,
+  MAX_FULL_DATA_BYTES,
+} from './toolbox-data.js'
+import {
+  SETTINGS_TAB_KEY as SETTINGS_TAB_STORAGE_KEY,
+  readSettingsTab as readSettingsTabValue,
+  writeSettingsTab as writeSettingsTabValue,
+} from './settings-preferences.js'
+import {
+  readFeatureSettings,
+  subscribeFeatureSettings,
+  writeFeatureSettings,
+} from './feature-settings.js'
 
-/** Which sub-page of the toolbox settings tab is showing. */
-export const SETTINGS_TAB_KEY = 'dsh-toolbox:settings-tab:v1'
-
-/** Read the remembered sub-page; anything unexpected falls back to groups. */
+export const SETTINGS_TAB_KEY = SETTINGS_TAB_STORAGE_KEY
 export function readSettingsTab(storage) {
-  try {
-    return storage?.getItem?.(SETTINGS_TAB_KEY) === 'identity' ? 'identity' : 'groups'
-  } catch {
-    return 'groups'
-  }
+  return readSettingsTabValue(storage)
 }
-
-/** Remember the sub-page (best effort; storage may be unavailable). */
 export function writeSettingsTab(storage, tab) {
-  try {
-    storage?.setItem?.(SETTINGS_TAB_KEY, tab === 'identity' ? 'identity' : 'groups')
-  } catch {
-    // Losing the preference is harmless.
-  }
+  return writeSettingsTabValue(storage, tab)
 }
 
 export function createSettingsPanel(React) {
@@ -72,6 +73,9 @@ export function createSettingsPanel(React) {
     const [nameDrafts, setNameDrafts] = useState({})
     const [importText, setImportText] = useState('')
     const [notice, setNotice] = useState(null) // { kind: 'ok' | 'error', message: string }
+    const [dataBusy, setDataBusy] = useState(false)
+    const [featureSettings, setFeatureSettings] = useState(() => readFeatureSettings(storage))
+    const [identityRefreshToken, setIdentityRefreshToken] = useState(0)
     const [draggedGroupId, setDraggedGroupId] = useState(null)
     const [dropTargetGroupId, setDropTargetGroupId] = useState(null)
     const fileInputRef = useRef(null)
@@ -90,6 +94,9 @@ export function createSettingsPanel(React) {
     // Keep state in sync with cross-component or cross-window updates
     useEffect(() => {
       if (!win) return
+      const offFeatureSettings = subscribeFeatureSettings(win, (nextSettings) => {
+        setFeatureSettings(nextSettings)
+      })
       const offConfig = subscribeConfig(win, (nextConfig) => {
         configRef.current = nextConfig
         setConfig(nextConfig)
@@ -98,10 +105,20 @@ export function createSettingsPanel(React) {
         setCatalog(nextCatalog)
       })
       return () => {
+        offFeatureSettings()
         offConfig()
         offCatalog()
       }
     }, [win])
+
+    const updateFeature = useCallback((name, enabled) => {
+      try {
+        const next = writeFeatureSettings(storage, { ...featureSettings, [name]: enabled }, win)
+        setFeatureSettings(next)
+      } catch (error) {
+        setNotice({ kind: 'error', message: t('settings.feature.error', { message: error.message }) })
+      }
+    }, [featureSettings, storage, t, win])
 
     const persistConfig = useCallback(
       (updater) => {
@@ -232,86 +249,126 @@ export function createSettingsPanel(React) {
       persistConfig((prev) => ({ ...prev, preserveProviderGroups: checked }))
     }
 
-    const handleExport = () => {
-      const json = exportConfig(config)
-      setImportText(json)
-      if (win.navigator?.clipboard?.writeText) {
-        win.navigator.clipboard.writeText(json).catch(() => {})
-      }
-      setNotice({ kind: 'ok', message: t('settings.data.copied') })
+    const dataErrorText = (error) => {
+      if (error?.rollbackError || error?.identityRollbackError) return t('settings.data.rollbackWarning')
+      if (error instanceof ToolboxDataError && error.code === 'storage-unavailable') return t('settings.data.storageUnavailable')
+      return error?.message || String(error)
     }
 
-    const handleDownload = () => {
-      const json = exportConfig(config)
+    const handleExport = async () => {
+      setDataBusy(true)
       try {
-        const blob = new Blob([json], { type: 'application/json' })
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = `dsh-toolbox-config-${new Date().toISOString().slice(0, 10)}.json`
-        a.click()
-        URL.revokeObjectURL(url)
+        const json = await exportToolboxData(storage, { window: win, settingsTab: activeTab })
+        setImportText(json)
+        let copied = false
+        if (win.navigator?.clipboard?.writeText) {
+          try {
+            await win.navigator.clipboard.writeText(json)
+            copied = true
+          } catch {
+            // The JSON remains available in the textarea for manual copying.
+          }
+        }
+        setNotice({ kind: 'ok', message: t(copied ? 'settings.data.copied' : 'settings.data.exportReady') })
       } catch (err) {
-        setNotice({ kind: 'error', message: String(err) })
+        setNotice({ kind: 'error', message: t('settings.data.exportError', { message: dataErrorText(err) }) })
+      } finally {
+        setDataBusy(false)
       }
     }
 
-    const handleImport = () => {
-      if (!importText.trim()) return
+    const handleDownload = async () => {
+      setDataBusy(true)
       try {
-        const imported = importConfig(storage, importText, win)
-        setConfig(imported)
-        setNameDrafts({})
-        setNotice({ kind: 'ok', message: t('settings.data.importSuccess') })
+        const json = await exportToolboxData(storage, { window: win, settingsTab: activeTab })
+        const BlobConstructor = win.Blob ?? globalThis.Blob
+        const URLConstructor = win.URL ?? globalThis.URL
+        const doc = win.document ?? globalThis.document
+        const blob = new BlobConstructor([json], { type: 'application/json' })
+        const url = URLConstructor.createObjectURL(blob)
+        const a = doc.createElement('a')
+        a.href = url
+        a.download = `dsh-toolbox-data-${new Date().toISOString().slice(0, 10)}.json`
+        a.click()
+        URLConstructor.revokeObjectURL(url)
+        setNotice({ kind: 'ok', message: t('settings.data.downloaded') })
+      } catch (err) {
+        setNotice({ kind: 'error', message: t('settings.data.exportError', { message: dataErrorText(err) }) })
+      } finally {
+        setDataBusy(false)
+      }
+    }
+
+    const applyImportedResult = (result) => {
+      const next = result?.data?.local?.modelConfig ?? result?.config
+      if (next) {
+        configRef.current = next
+        setConfig(next)
+      }
+      if (result?.data?.local?.catalog?.models) setCatalog(result.data.local.catalog.models)
+      setNameDrafts({})
+      if (result?.kind === 'full') {
+        setActiveTab(result.data.local.settings.tab)
+        setFeatureSettings(result.data.local.features)
+        setIdentityRefreshToken((value) => value + 1)
+      }
+      setNotice({ kind: 'ok', message: t('settings.data.importSuccess') })
+    }
+
+    const importTextValue = async (content) => {
+      if (!content.trim()) return
+      setDataBusy(true)
+      try {
+        const result = await importToolboxData(storage, content, { window: win })
+        applyImportedResult(result)
       } catch (err) {
         setNotice({
           kind: 'error',
-          message: t('settings.data.importError', { message: err?.message || String(err) }),
+          message: t('settings.data.importError', { message: dataErrorText(err) }),
         })
+      } finally {
+        setDataBusy(false)
       }
     }
+
+    const handleImport = () => importTextValue(importText)
 
     const handleFileImport = (e) => {
       const file = e.target?.files?.[0]
       if (!file) return
       const input = e.target
-      const reader = new FileReader()
+      if (file.size > MAX_FULL_DATA_BYTES) {
+        input.value = ''
+        setNotice({ kind: 'error', message: t('settings.data.importError', { message: t('settings.data.tooLarge') }) })
+        return
+      }
+      const reader = new (win.FileReader ?? globalThis.FileReader)()
       reader.onload = (event) => {
         const content = event.target?.result
         if (typeof content === 'string') {
           setImportText(content)
-          try {
-            const imported = importConfig(storage, content, win)
-            setConfig(imported)
-            setNameDrafts({})
-            setNotice({ kind: 'ok', message: t('settings.data.importSuccess') })
-          } catch (err) {
-            setNotice({
-              kind: 'error',
-              message: t('settings.data.importError', { message: err?.message || String(err) }),
-            })
-          }
+          void importTextValue(content)
         }
         input.value = ''
       }
       reader.onerror = () => {
         input.value = ''
+        setNotice({ kind: 'error', message: t('settings.data.importError', { message: t('settings.data.fileReadError') }) })
       }
       reader.readAsText(file)
     }
 
-    const handleReset = () => {
+    const handleReset = async () => {
       if (win.confirm && !win.confirm(t('settings.data.restoreConfirm'))) return
+      setDataBusy(true)
       try {
-        const fresh = resetConfig(storage, win)
-        setConfig(fresh)
-        setNameDrafts({})
-        setNotice({ kind: 'ok', message: t('settings.saved') })
+        const result = await resetToolboxData(storage, { window: win })
+        applyImportedResult(result)
+        setActiveTab('groups')
       } catch (err) {
-        setNotice({
-          kind: 'error',
-          message: t('settings.data.storageError', { message: err?.message || String(err) }),
-        })
+        setNotice({ kind: 'error', message: t('settings.data.importError', { message: dataErrorText(err) }) })
+      } finally {
+        setDataBusy(false)
       }
     }
 
@@ -379,76 +436,93 @@ export function createSettingsPanel(React) {
         ),
       ),
 
-      // Sub-page tabs: model groups vs. request identity
+      // Sub-page tabs
       h(
         'div',
         { className: 'dsh-toolbox-settings-tabs', role: 'tablist', 'aria-label': t('settings.tabs.aria') },
-        h(
-          'button',
-          {
-            type: 'button',
-            role: 'tab',
-            className: 'dsh-toolbox-settings-tab',
-            'data-tab': 'groups',
-            'data-active': activeTab === 'groups' ? 'true' : 'false',
-            'aria-selected': activeTab === 'groups' ? 'true' : 'false',
-            onClick: () => setActiveTab('groups'),
-          },
-          t('settings.tabs.groups'),
-        ),
-        h(
-          'button',
-          {
-            type: 'button',
-            role: 'tab',
-            className: 'dsh-toolbox-settings-tab',
-            'data-tab': 'identity',
-            'data-active': activeTab === 'identity' ? 'true' : 'false',
-            'aria-selected': activeTab === 'identity' ? 'true' : 'false',
-            onClick: () => setActiveTab('identity'),
-          },
-          t('settings.tabs.identity'),
+        ['groups', 'identity', 'other'].map((tab) =>
+          h(
+            'button',
+            {
+              key: tab,
+              type: 'button',
+              role: 'tab',
+              className: 'dsh-toolbox-settings-tab',
+              'data-tab': tab,
+              'data-active': activeTab === tab ? 'true' : 'false',
+              'aria-selected': activeTab === tab ? 'true' : 'false',
+              onClick: () => setActiveTab(tab),
+            },
+            t(`settings.tabs.${tab}`),
+          ),
         ),
       ),
+
+      notice
+        ? h(
+            'div',
+            {
+              className: 'dsh-toolbox-notice',
+              'data-kind': notice.kind,
+            },
+            notice.message,
+          )
+        : null,
 
       // Page: model groups
       h(
         'div',
         { className: 'dsh-toolbox-settings-page', 'data-page': 'groups' },
 
-        // Notification bar
-        notice
-          ? h(
-              'div',
-              {
-                className: 'dsh-toolbox-notice',
-                'data-kind': notice.kind,
-              },
-              notice.message,
-            )
-          : null,
-
-        // Section 1: Catalog Status
+        // Section 1: Model groups feature switch
         h(
           'div',
           { className: 'dsh-toolbox-card' },
           h(
             'div',
-            { className: 'dsh-toolbox-card-head' },
-            h('h3', { className: 'dsh-toolbox-card-title' }, t('settings.catalog.title')),
+            { className: 'dsh-toolbox-pref' },
             h(
-              'span',
-              { className: 'dsh-toolbox-count' },
-              t('settings.catalog.summary', { count: catalog.length }),
+              'div',
+              { className: 'dsh-toolbox-pref-copy' },
+              h('div', { className: 'dsh-toolbox-pref-title' }, t('settings.feature.modelGroups')),
+              h('div', { className: 'dsh-toolbox-muted' }, t('settings.feature.modelGroupsHint')),
             ),
+            h('input', {
+              type: 'checkbox',
+              className: 'dsh-toolbox-switch',
+              'data-feature': 'modelGroups',
+              checked: featureSettings.modelGroups,
+              disabled: dataBusy,
+              onChange: (event) => updateFeature('modelGroups', event.target.checked),
+            }),
           ),
-          catalog.length === 0
-            ? h('p', { className: 'dsh-toolbox-muted' }, t('settings.catalog.empty'))
-            : h('p', { className: 'dsh-toolbox-muted' }, t('settings.catalog.hint')),
         ),
 
-        // Section 2: Preferences / Opening Behavior
-      h(
+        featureSettings.modelGroups
+          ? h(
+              React.Fragment,
+              null,
+              // Section 2: Catalog Status
+              h(
+                'div',
+                { className: 'dsh-toolbox-card' },
+                h(
+                  'div',
+                  { className: 'dsh-toolbox-card-head' },
+                  h('h3', { className: 'dsh-toolbox-card-title' }, t('settings.catalog.title')),
+                  h(
+                    'span',
+                    { className: 'dsh-toolbox-count' },
+                    t('settings.catalog.summary', { count: catalog.length }),
+                  ),
+                ),
+                catalog.length === 0
+                  ? h('p', { className: 'dsh-toolbox-muted' }, t('settings.catalog.empty'))
+                  : h('p', { className: 'dsh-toolbox-muted' }, t('settings.catalog.hint')),
+              ),
+
+              // Section 3: Preferences / Opening Behavior
+              h(
         'div',
         { className: 'dsh-toolbox-card' },
         h('div', { className: 'dsh-toolbox-card-head' }, h('h3', { className: 'dsh-toolbox-card-title' }, t('settings.prefs.title'))),
@@ -510,7 +584,7 @@ export function createSettingsPanel(React) {
         ),
       ),
 
-      // Section 3: Custom Group Management
+      // Section 4: Custom Group Management
       h(
         'div',
         { className: 'dsh-toolbox-card' },
@@ -736,7 +810,7 @@ export function createSettingsPanel(React) {
             ),
       ),
 
-      // Section 4: Stale Model Keys Warning & Cleanup
+      // Section 5: Stale Model Keys Warning & Cleanup
       staleKeys.length > 0
         ? h(
             'div',
@@ -772,95 +846,120 @@ export function createSettingsPanel(React) {
             ),
           )
         : null,
-
-      // Section 5: Data Export / Import / Reset
-      h(
-        'div',
-        { className: 'dsh-toolbox-card' },
-        h(
-          'div',
-          { className: 'dsh-toolbox-card-head' },
-          h('h3', { className: 'dsh-toolbox-card-title' }, t('settings.data.title')),
-          h(
-            'div',
-            { className: 'dsh-toolbox-row' },
-            h(
-              'button',
-              {
-                type: 'button',
-                className: 'dsh-toolbox-button',
-                onClick: handleExport,
-              },
-              t('settings.data.copy'),
-            ),
-            h(
-              'button',
-              {
-                type: 'button',
-                className: 'dsh-toolbox-button',
-                onClick: handleDownload,
-              },
-              t('settings.data.download'),
-            ),
-            h(
-              'button',
-              {
-                type: 'button',
-                className: 'dsh-toolbox-button',
-                'data-variant': 'danger',
-                onClick: handleReset,
-              },
-              t('settings.data.restore'),
-            ),
-          ),
-        ),
-        h('p', { className: 'dsh-toolbox-muted' }, t('settings.data.importHint')),
-        h('textarea', {
-          className: 'dsh-toolbox-textarea',
-          style: { marginTop: 8 },
-          placeholder: t('settings.data.importPlaceholder'),
-          value: importText,
-          onChange: (e) => setImportText(e.target.value),
-        }),
-        h(
-          'div',
-          { className: 'dsh-toolbox-row', style: { marginTop: 8 } },
-          h(
-            'button',
-            {
-              type: 'button',
-              className: 'dsh-toolbox-button',
-              'data-variant': 'primary',
-              disabled: !importText.trim(),
-              onClick: handleImport,
-            },
-            t('settings.data.import'),
-          ),
-          h('input', {
-            type: 'file',
-            accept: '.json',
-            ref: fileInputRef,
-            style: { display: 'none' },
-            onChange: handleFileImport,
-          }),
-          h(
-            'button',
-            {
-              type: 'button',
-              className: 'dsh-toolbox-button',
-              onClick: () => fileInputRef.current?.click(),
-            },
-            t('settings.data.chooseFile'),
-          ),
-        ),
-      ),
+              )
+            : null,
       ),
 
       // Page: request identity rewrite (host fetch patch)
       h(
         'div',
         { className: 'dsh-toolbox-settings-page', 'data-page': 'identity' },
-        h(IdentitySection, { key: 'identity', t, win }),
+        h(IdentitySection, { key: 'identity', t, win, refreshToken: identityRefreshToken }),
+      ),
+
+      // Page: other settings and full plugin data
+      h(
+        'div',
+        { className: 'dsh-toolbox-settings-page', 'data-page': 'other' },
+        h(
+          'div',
+          { className: 'dsh-toolbox-card' },
+          h(
+            'div',
+            { className: 'dsh-toolbox-pref' },
+            h(
+              'div',
+              { className: 'dsh-toolbox-pref-copy' },
+              h('div', { className: 'dsh-toolbox-pref-title' }, t('settings.feature.workspaceFlatToggle')),
+              h('div', { className: 'dsh-toolbox-muted' }, t('settings.feature.workspaceFlatToggleHint')),
+            ),
+            h('input', {
+              type: 'checkbox',
+              className: 'dsh-toolbox-switch',
+              'data-feature': 'workspaceFlatToggle',
+              checked: featureSettings.workspaceFlatToggle,
+              disabled: dataBusy,
+              onChange: (event) => updateFeature('workspaceFlatToggle', event.target.checked),
+            }),
+          ),
+        ),
+        h(
+          'div',
+          { className: 'dsh-toolbox-card' },
+          h(
+            'div',
+            { className: 'dsh-toolbox-card-head' },
+            h('h3', { className: 'dsh-toolbox-card-title' }, t('settings.data.title')),
+            h(
+              'div',
+              { className: 'dsh-toolbox-row' },
+              h(
+                'button',
+                { type: 'button', className: 'dsh-toolbox-button', disabled: dataBusy, onClick: handleExport },
+                t('settings.data.copy'),
+              ),
+              h(
+                'button',
+                { type: 'button', className: 'dsh-toolbox-button', disabled: dataBusy, onClick: handleDownload },
+                t('settings.data.download'),
+              ),
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dsh-toolbox-button',
+                  'data-variant': 'danger',
+                  disabled: dataBusy,
+                  onClick: handleReset,
+                },
+                t('settings.data.restore'),
+              ),
+            ),
+          ),
+          h('p', { className: 'dsh-toolbox-muted' }, t('settings.data.scope')),
+          h('p', { className: 'dsh-toolbox-identity-warn' }, t('settings.data.securityWarning')),
+          h('p', { className: 'dsh-toolbox-muted' }, t('settings.data.importHint')),
+          h('textarea', {
+            className: 'dsh-toolbox-textarea',
+            style: { marginTop: 8 },
+            placeholder: t('settings.data.importPlaceholder'),
+            value: importText,
+            disabled: dataBusy,
+            onChange: (e) => setImportText(e.target.value),
+          }),
+          h(
+            'div',
+            { className: 'dsh-toolbox-row', style: { marginTop: 8 } },
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'dsh-toolbox-button',
+                'data-variant': 'primary',
+                disabled: dataBusy || !importText.trim(),
+                onClick: handleImport,
+              },
+              t('settings.data.import'),
+            ),
+            h('input', {
+              type: 'file',
+              accept: '.json',
+              ref: fileInputRef,
+              style: { display: 'none' },
+              onChange: handleFileImport,
+            }),
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'dsh-toolbox-button',
+                disabled: dataBusy,
+                onClick: () => fileInputRef.current?.click(),
+              },
+              t('settings.data.chooseFile'),
+            ),
+          ),
+        ),
       ),
     )
   }

@@ -20,10 +20,13 @@ const modules = [
   'src/model-catalog.js',
   'src/model-groups.js',
   'src/model-storage.js',
+  'src/settings-preferences.js',
+  'src/feature-settings.js',
   'src/i18n.js',
   'src/styles.js',
   'src/model-selector.js',
   'src/workspace-flat-toggle.js',
+  'src/toolbox-data.js',
   'src/settings-panel.js',
   'src/features.js',
 ]

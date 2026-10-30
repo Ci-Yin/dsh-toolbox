@@ -10,6 +10,7 @@
 import { createModelSelectorController } from './model-selector.js'
 import { createWorkspaceFlatToggleController } from './workspace-flat-toggle.js'
 import { createSettingsPanel } from './settings-panel.js'
+import { readFeatureSettings, subscribeFeatureSettings } from './feature-settings.js'
 import { NS, en, zh } from './i18n.js'
 
 /**
@@ -18,6 +19,14 @@ import { NS, en, zh } from './i18n.js'
  * host service. If the structure differs, the button stays on the menu and the
  * user can open Settings manually.
  */
+function safeFeatureStorage(win) {
+  try {
+    return win?.localStorage ?? (typeof localStorage !== 'undefined' ? localStorage : null)
+  } catch {
+    return null
+  }
+}
+
 export function navigateToToolboxSettings(doc = globalThis.document) {
   if (!doc) return false
   const existing = doc.querySelector?.('div[role="dialog"][data-shortcut-modal="settings"]')
@@ -81,16 +90,69 @@ export const workspaceFlatToggleFeature = {
   apply(ctx, helpers) {
     const doc = typeof document !== 'undefined' ? document : null
     const win = typeof window !== 'undefined' ? window : null
+    const storage = safeFeatureStorage(win)
     const controller = createWorkspaceFlatToggleController({
       document: doc,
       window: win,
+      storage,
       slots: ctx.slots,
       t: helpers.t,
       logger: ctx.logger ?? console,
     })
     helpers.workspaceFlatToggle = controller
-    if (doc) controller.start()
-    return () => controller.stop()
+    const sync = (settings) => {
+      if (settings.workspaceFlatToggle) controller.start()
+      else controller.stop()
+    }
+    const unsubscribe = subscribeFeatureSettings(win, sync)
+    sync(readFeatureSettings(storage))
+    return () => {
+      unsubscribe()
+      controller.stop()
+    }
+  },
+}
+
+export const settingsPanelFeature = {
+  id: 'settings-panel',
+  name: 'Toolbox settings',
+  description: 'Register the DSH Toolbox settings page independently of optional feature switches.',
+  inject: ['slots', 'locale'],
+  defaultEnabled: true,
+
+  apply(ctx, helpers) {
+    const win = typeof window !== 'undefined' ? window : null
+    const storage = safeFeatureStorage(win)
+    const t = helpers.t
+    if (!helpers.React || !ctx.slots?.inject) return () => {}
+
+    const SettingsView = createSettingsPanel(helpers.React)
+    const Component = (props) =>
+      helpers.React.createElement(SettingsView, {
+        ...props,
+        t,
+        storage,
+        window: win,
+      })
+    const slotDisposer = ctx.slots.inject('settings.plugins.tab', () =>
+      ctx.slots.register(
+        {
+          name: 'settings.plugins.tab',
+          id: 'dsh-toolbox',
+          order: 20,
+          label: () => t('settings.tab'),
+          locale: NS,
+        },
+        Component,
+      ),
+    )
+    return () => {
+      try {
+        if (typeof slotDisposer === 'function') slotDisposer()
+      } catch {
+        // The slot owner may already be disposed during page teardown.
+      }
+    }
   },
 }
 
@@ -109,9 +171,8 @@ export const modelGroupsFeature = {
   apply(ctx, helpers) {
     const doc = typeof document !== 'undefined' ? document : null
     const win = typeof window !== 'undefined' ? window : null
-    const storage = typeof localStorage !== 'undefined' ? localStorage : null
+    const storage = safeFeatureStorage(win)
     const t = helpers.t
-
     const controller = createModelSelectorController({
       document: doc,
       window: win,
@@ -121,45 +182,21 @@ export const modelGroupsFeature = {
       logger: ctx.logger ?? console,
     })
     helpers.controller = controller
-    if (doc) controller.start()
-
-    let slotDisposer = null
-    if (helpers.React && ctx.slots?.inject) {
-      const SettingsView = createSettingsPanel(helpers.React)
-      const Component = (props) =>
-        helpers.React.createElement(SettingsView, {
-          ...props,
-          t,
-          storage,
-          window: win,
-        })
-      slotDisposer = ctx.slots.inject('settings.plugins.tab', () =>
-        ctx.slots.register(
-          {
-            name: 'settings.plugins.tab',
-            id: 'dsh-toolbox',
-            order: 20,
-            label: () => t('settings.tab'),
-            locale: NS,
-          },
-          Component,
-        ),
-      )
+    const sync = (settings) => {
+      if (settings.modelGroups) controller.start()
+      else controller.stop()
     }
-
+    const unsubscribe = subscribeFeatureSettings(win, sync)
+    sync(readFeatureSettings(storage))
     return () => {
-      try {
-        if (typeof slotDisposer === 'function') slotDisposer()
-      } catch {
-        // The slot owner may already be disposed during page teardown.
-      }
+      unsubscribe()
       controller.stop()
     }
   },
 }
 
 /** Active features. Append `messageEditFeature` here in phase 2. */
-export const features = [modelGroupsFeature, workspaceFlatToggleFeature]
+export const features = [settingsPanelFeature, modelGroupsFeature, workspaceFlatToggleFeature]
 
 /**
  * Build the plugin face consumed by the Web module factory.

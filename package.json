@@ -26,7 +26,8 @@
   ],
   "scripts": {
     "build": "node scripts/build-client.mjs",
-    "test": "node --test test/model-catalog.test.js test/model-groups.test.js test/model-storage.test.js test/model-selector.test.js test/workspace-flat-toggle.test.js test/settings-panel.test.js test/settings-interaction.test.js test/settings-tabs.test.js test/identity-core.test.js test/identity-patch.test.js test/identity-host.test.js test/identity-client.test.js test/identity-entry.test.js test/client-bundle.test.js",
+    "test": "node --test test/model-catalog.test.js test/model-groups.test.js test/model-storage.test.js test/model-selector.test.js test/workspace-flat-toggle.test.js test/settings-panel.test.js test/settings-interaction.test.js test/settings-tabs.test.js test/features.test.js test/identity-core.test.js test/identity-patch.test.js test/identity-host.test.js test/identity-client.test.js test/identity-entry.test.js test/client-bundle.test.js test/feature-settings.test.js test/toolbox-data.test.js",
+    "test:toolbox-data": "node --test test/toolbox-data.test.js",
     "check": "node scripts/build-client.mjs --check && node scripts/check-syntax.mjs"
   },
   "dsh": {

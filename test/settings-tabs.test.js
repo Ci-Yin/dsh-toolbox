@@ -30,22 +30,26 @@ function identitySnapshot() {
   }
 }
 
-test('the settings page renders two sub-page tabs and both page containers', () => {
+test('the settings page renders three sub-page tabs with configuration data only in other settings', () => {
   const Panel = createSettingsPanel(React)
   const html = renderToStaticMarkup(React.createElement(Panel, { t, storage: fixtureStorage() }))
   assert.match(html, /role="tablist"/u)
   assert.match(html, /data-tab="groups"/u)
   assert.match(html, /data-page="groups"/u)
   assert.match(html, /data-page="identity"/u)
+  assert.match(html, /data-page="other"/u)
   assert.match(html, /aria-selected="true">模型分组/u)
   assert.match(html, /aria-selected="false">请求身份改写/u)
-  // Groups content belongs to its own page, the identity card to the other.
+  assert.match(html, /aria-selected="false">其它设置/u)
   const groupsPage = html.slice(html.indexOf('data-page="groups"'), html.indexOf('data-page="identity"'))
-  const identityPage = html.slice(html.indexOf('data-page="identity"'))
+  const identityPage = html.slice(html.indexOf('data-page="identity"'), html.indexOf('data-page="other"'))
+  const otherPage = html.slice(html.indexOf('data-page="other"'))
   assert.match(groupsPage, /自定义分组/u)
-  assert.doesNotMatch(groupsPage, /身份规则/u)
+  assert.doesNotMatch(groupsPage, /配置数据|身份规则/u)
   assert.match(identityPage, /身份规则/u)
-  assert.doesNotMatch(identityPage, /自定义分组/u)
+  assert.doesNotMatch(identityPage, /配置数据|自定义分组/u)
+  assert.match(otherPage, /配置数据|导入 JSON|安全提示/u)
+  assert.doesNotMatch(otherPage, /dsh-toolbox-identity-rule-main|>自定义分组</u)
 })
 
 test('clicking the identity tab switches the page and remembers the choice', async () => {
@@ -67,7 +71,7 @@ test('clicking the identity tab switches the page and remembers the choice', asy
   const tabs = [...dom.window.document.querySelectorAll('.dsh-toolbox-settings-tab')]
   assert.deepEqual(
     tabs.map((tab) => tab.textContent),
-    ['模型分组', '请求身份改写'],
+    ['模型分组', '请求身份改写', '其它设置'],
   )
   assert.equal(tabs[0].getAttribute('aria-selected'), 'true')
 
@@ -77,10 +81,17 @@ test('clicking the identity tab switches the page and remembers the choice', asy
   assert.equal(container.getAttribute('data-tab'), 'identity')
   assert.equal(tabs[1].getAttribute('aria-selected'), 'true')
   assert.equal(tabs[0].getAttribute('aria-selected'), 'false')
+  assert.equal(tabs[2].getAttribute('aria-selected'), 'false')
   assert.equal(storage.getItem(SETTINGS_TAB_KEY), 'identity')
   assert.match(dom.window.document.body.textContent, /身份规则/u)
   // The groups page stays mounted (CSS hides it) so its edits are not lost.
   assert.ok(dom.window.document.querySelector('[data-page="groups"]'))
+  await act(async () => {
+    tabs[2].click()
+  })
+  assert.equal(container.getAttribute('data-tab'), 'other')
+  assert.equal(tabs[2].getAttribute('aria-selected'), 'true')
+  assert.equal(storage.getItem(SETTINGS_TAB_KEY), 'other')
 
   await act(async () => {
     root.unmount()
@@ -89,8 +100,8 @@ test('clicking the identity tab switches the page and remembers the choice', asy
 
   // A fresh mount with the same storage opens on the remembered tab.
   const html = renderToStaticMarkup(React.createElement(Panel, { t, storage }))
-  assert.match(html, /class="dsh-toolbox-settings" data-tab="identity"/u)
-  assert.match(html, /aria-selected="true">请求身份改写/u)
+  assert.match(html, /class="dsh-toolbox-settings" data-tab="other"/u)
+  assert.match(html, /aria-selected="true">其它设置/u)
 })
 
 test('an invalid stored tab falls back to the model-groups page', () => {

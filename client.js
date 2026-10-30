@@ -515,6 +515,7 @@ window.__ModuleLoader__.load({
         return function IdentitySection(props) {
           const t = props.t ?? ((key) => key)
           const win = props.win ?? globalThis
+          const refreshToken = props.refreshToken ?? 0
 
           const api = useMemo(() => createIdentityApi(win), [win])
 
@@ -568,23 +569,27 @@ window.__ModuleLoader__.load({
 
           useEffect(() => {
             load()
-          }, [load])
+          }, [load, refreshToken])
 
           const commit = useCallback(
-            async (nextValue, successMessage) => {
+            async (nextValue, successMessage, options = {}) => {
               if (snapshot === null) return false
               setBusy(true)
               try {
                 const body = await api.save(nextValue, snapshot.revision)
                 acceptSnapshot(body)
                 const dropped = Array.isArray(body?.droppedHeaders) ? body.droppedHeaders : []
-                setNotice({
-                  kind: 'ok',
-                  message:
-                    dropped.length > 0
-                      ? t('identity.droppedHeaders', { names: dropped.join(', ') })
-                      : successMessage ?? t('settings.saved'),
-                })
+                if (!options.silentSuccess) {
+                  setNotice({
+                    kind: 'ok',
+                    message:
+                      dropped.length > 0
+                        ? t('identity.droppedHeaders', { names: dropped.join(', ') })
+                        : successMessage ?? t('settings.saved'),
+                  })
+                } else {
+                  setNotice(null)
+                }
                 setFieldErrors({})
                 return true
               } catch (error) {
@@ -967,10 +972,11 @@ window.__ModuleLoader__.load({
                 ? h('input', {
                     type: 'checkbox',
                     className: 'dsh-toolbox-switch',
+                    'data-feature': 'identity',
                     checked: value.enabled,
                     disabled: busy,
                     title: t('identity.enable'),
-                    onChange: () => commit({ ...value, enabled: !value.enabled }),
+                    onChange: () => commit({ ...value, enabled: !value.enabled }, undefined, { silentSuccess: true }),
                   })
                 : null,
             ),
@@ -1011,7 +1017,7 @@ window.__ModuleLoader__.load({
                 )
               : null,
 
-            ready
+            ready && value.enabled
               ? h(
                   'div',
                   { className: 'dsh-toolbox-identity-body' },
@@ -2219,6 +2225,47 @@ window.__ModuleLoader__.load({
         }
       }
 
+      const CATALOG_KEYS = new Set(['version', 'updatedAt', 'models'])
+
+      /** Normalize a serialized catalog payload for full-data export/import. */
+      function normalizeCatalogPayload(raw) {
+        if (!isPlainObject(raw) || raw.version !== 1 || !Array.isArray(raw.models)) {
+          throw new ConfigValidationError('invalid-catalog', 'Invalid catalog cache')
+        }
+        rejectUnknownKeys(raw, CATALOG_KEYS, 'catalog')
+        if (!Number.isSafeInteger(raw.updatedAt) || raw.updatedAt < 0) {
+          throw new ConfigValidationError('invalid-catalog', 'Invalid catalog timestamp', 'catalog.updatedAt')
+        }
+        if (raw.models.length > MAX_CATALOG_MODELS) {
+          throw new ConfigValidationError('too-many-models', 'Catalog cache is too large', 'catalog.models')
+        }
+        const models = []
+        const seen = new Set()
+        const modelKeys = new Set(['key', 'providerId', 'providerName', 'modelId', 'name'])
+        for (const [index, model] of raw.models.entries()) {
+          const path = `catalog.models[${index}]`
+          rejectUnknownKeys(model, modelKeys, path)
+          for (const field of modelKeys) {
+            if (typeof model[field] !== 'string') {
+              throw new ConfigValidationError('invalid-catalog', `Invalid catalog ${field}`, `${path}.${field}`)
+            }
+          }
+          const key = normalizeModelKey(model.key)
+          if (key === '' || key !== model.key || seen.has(key)) {
+            throw new ConfigValidationError('invalid-catalog', 'Invalid or duplicate catalog model key', `${path}.key`)
+          }
+          seen.add(key)
+          models.push({
+            key,
+            providerId: model.providerId,
+            providerName: model.providerName,
+            modelId: model.modelId,
+            name: model.name,
+          })
+        }
+        return { version: 1, updatedAt: raw.updatedAt, models }
+      }
+
       /** Read the cached catalog snapshot; an absent or malformed cache is empty. */
       function loadCatalogResult(storage) {
         const text = readText(storage, CATALOG_KEY)
@@ -2257,17 +2304,18 @@ window.__ModuleLoader__.load({
         return loadCatalogResult(storage).models
       }
 
+      /** Persist a complete catalog payload without changing its timestamp. */
+      function saveCatalogPayload(storage, payload, target = null) {
+        const normalized = normalizeCatalogPayload(payload)
+        writeText(storage, CATALOG_KEY, JSON.stringify(normalized))
+        if (target) notifyCatalogChanged(target, normalized.models)
+        return normalized
+      }
+
       /** Persist the last observed catalog for the settings page. */
       function saveCatalog(storage, models, target = null) {
         const snapshot = toCatalogSnapshot(Array.isArray(models) ? models : []).slice(0, MAX_CATALOG_MODELS)
-        const payload = {
-          version: 1,
-          updatedAt: Date.now(),
-          models: snapshot,
-        }
-        writeText(storage, CATALOG_KEY, JSON.stringify(payload))
-        if (target) notifyCatalogChanged(target, snapshot)
-        return payload
+        return saveCatalogPayload(storage, { version: 1, updatedAt: Date.now(), models: snapshot }, target)
       }
 
       /** Subscribe to same-window and cross-window catalog snapshots. */
@@ -2300,7 +2348,171 @@ window.__ModuleLoader__.load({
         }
         return result
       }
-      return { createDefaultConfig, migrateConfig, normalizeConfig, parseConfigText, exportConfig, resolveStorage, loadConfigResult, loadConfig, saveConfig, importConfig, resetConfig, notifyConfigChanged, notifyCatalogChanged, subscribeConfig, loadCatalogResult, loadCatalog, saveCatalog, subscribeCatalog, missingModelKeys, ConfigValidationError, STORAGE_KEY, CATALOG_KEY, CONFIG_EVENT, CATALOG_EVENT, CONFIG_VERSION, MAX_IMPORT_BYTES, MAX_GROUPS, MAX_MODELS_PER_GROUP, MAX_CATALOG_MODELS, MAX_GROUP_NAME, MAX_MODEL_KEY, validateConfig }
+      return { createDefaultConfig, migrateConfig, normalizeConfig, parseConfigText, exportConfig, resolveStorage, loadConfigResult, loadConfig, saveConfig, importConfig, resetConfig, notifyConfigChanged, notifyCatalogChanged, subscribeConfig, normalizeCatalogPayload, loadCatalogResult, loadCatalog, saveCatalogPayload, saveCatalog, subscribeCatalog, missingModelKeys, ConfigValidationError, STORAGE_KEY, CATALOG_KEY, CONFIG_EVENT, CATALOG_EVENT, CONFIG_VERSION, MAX_IMPORT_BYTES, MAX_GROUPS, MAX_MODELS_PER_GROUP, MAX_CATALOG_MODELS, MAX_GROUP_NAME, MAX_MODEL_KEY, validateConfig }
+    }
+    __defs["src/settings-preferences.js"] = () => {
+      /** Persistent UI preferences shared by the settings page and full-data export. */
+
+      const SETTINGS_TAB_KEY = 'dsh-toolbox:settings-tab:v1'
+      const SETTINGS_TABS = Object.freeze(['groups', 'identity', 'other'])
+
+      function normalizeSettingsTab(value) {
+        return SETTINGS_TABS.includes(value) ? value : null
+      }
+
+      /** Read the remembered sub-page; anything unexpected falls back to groups. */
+      function readSettingsTab(storage) {
+        try {
+          return normalizeSettingsTab(storage?.getItem?.(SETTINGS_TAB_KEY)) ?? 'groups'
+        } catch {
+          return 'groups'
+        }
+      }
+
+      /** Remember the sub-page (best effort; storage may be unavailable). */
+      function writeSettingsTab(storage, tab) {
+        try {
+          storage?.setItem?.(SETTINGS_TAB_KEY, normalizeSettingsTab(tab) ?? 'groups')
+        } catch {
+          // Losing the preference is harmless.
+        }
+      }
+      return { normalizeSettingsTab, readSettingsTab, writeSettingsTab, SETTINGS_TAB_KEY, SETTINGS_TABS }
+    }
+    __defs["src/feature-settings.js"] = () => {
+      /** Persistent global switches for independently controlled toolbox features. */
+
+      const FEATURE_SETTINGS_KEY = 'dsh-toolbox:features:v1'
+      const FEATURE_SETTINGS_EVENT = 'dsh-toolbox:features-changed'
+      const FEATURE_SETTINGS_KEYS = Object.freeze(['modelGroups', 'workspaceFlatToggle'])
+      const DEFAULT_FEATURE_SETTINGS = Object.freeze({
+        modelGroups: true,
+        workspaceFlatToggle: true,
+      })
+
+      class FeatureSettingsError extends Error {
+        constructor(code, message, path = '') {
+          super(message)
+          this.name = 'FeatureSettingsError'
+          this.code = code
+          this.path = path
+        }
+      }
+
+      function isPlainObject(value) {
+        return typeof value === 'object' && value !== null && !Array.isArray(value)
+      }
+
+      function invalid(code, message, path = '') {
+        throw new FeatureSettingsError(code, message, path)
+      }
+
+      /** Strictly normalize a feature-switch object for persistence or import. */
+      function normalizeFeatureSettings(raw, options = {}) {
+        const strict = options.strict === true
+        if (!isPlainObject(raw)) {
+          if (strict) invalid('invalid-type', 'Feature settings must be an object')
+          return { ...DEFAULT_FEATURE_SETTINGS }
+        }
+        for (const key of Object.keys(raw)) {
+          if (!FEATURE_SETTINGS_KEYS.includes(key)) {
+            if (strict) invalid('unknown-field', `Unknown feature setting: ${key}`, key)
+            return { ...DEFAULT_FEATURE_SETTINGS }
+          }
+        }
+        for (const key of FEATURE_SETTINGS_KEYS) {
+          if (typeof raw[key] !== 'boolean') {
+            if (strict) invalid('invalid-type', 'Feature settings must contain boolean values', key)
+            return { ...DEFAULT_FEATURE_SETTINGS }
+          }
+        }
+        return {
+          modelGroups: raw.modelGroups,
+          workspaceFlatToggle: raw.workspaceFlatToggle,
+        }
+      }
+
+      function resolveStorage(storage) {
+        if (storage?.getItem) return storage
+        try {
+          return storage?.localStorage ?? null
+        } catch {
+          return null
+        }
+      }
+
+      function readRaw(storage) {
+        try {
+          const resolved = resolveStorage(storage)
+          return resolved?.getItem?.(FEATURE_SETTINGS_KEY) ?? null
+        } catch (error) {
+          return { error }
+        }
+      }
+
+      /** Read persisted switches and preserve a diagnostic for strict export paths. */
+      function loadFeatureSettingsResult(storage, options = {}) {
+        const rawResult = readRaw(storage)
+        if (rawResult?.error) return { settings: { ...DEFAULT_FEATURE_SETTINGS }, error: rawResult.error }
+        const raw = rawResult
+        if (raw === null || raw === '') return { settings: { ...DEFAULT_FEATURE_SETTINGS }, error: null }
+        try {
+          return { settings: normalizeFeatureSettings(JSON.parse(raw), options), error: null }
+        } catch (error) {
+          return { settings: { ...DEFAULT_FEATURE_SETTINGS }, error }
+        }
+      }
+
+      /** Read persisted switches; missing or damaged storage fails open to defaults. */
+      function readFeatureSettings(storage) {
+        return loadFeatureSettingsResult(storage).settings
+      }
+
+      /** Persist switches and notify current-window subscribers after a successful write. */
+      function writeFeatureSettings(storage, value, target = null) {
+        const normalized = normalizeFeatureSettings(value, { strict: true })
+        const resolved = resolveStorage(storage)
+        if (!resolved || typeof resolved.setItem !== 'function') {
+          throw new FeatureSettingsError('storage-unavailable', 'Feature settings storage is unavailable')
+        }
+        resolved.setItem(FEATURE_SETTINGS_KEY, JSON.stringify(normalized))
+        notifyFeatureSettings(target, normalized)
+        return normalized
+      }
+
+      function customEvent(target, detail) {
+        try {
+          const EventConstructor = target?.CustomEvent ?? globalThis.CustomEvent
+          if (typeof EventConstructor !== 'function' || typeof target?.dispatchEvent !== 'function') return
+          target.dispatchEvent(new EventConstructor(FEATURE_SETTINGS_EVENT, { detail: { settings: detail } }))
+        } catch {
+          // A non-browser test double may not support CustomEvent dispatch.
+        }
+      }
+
+      function notifyFeatureSettings(target, settings) {
+        customEvent(target, normalizeFeatureSettings(settings))
+      }
+
+      /** Subscribe to same-window and cross-window feature switch changes. */
+      function subscribeFeatureSettings(target, listener) {
+        if (!target?.addEventListener || typeof listener !== 'function') return () => {}
+        const onStorage = (event) => {
+          if (event?.key !== FEATURE_SETTINGS_KEY && event?.key != null) return
+          listener(readFeatureSettings(target))
+        }
+        const onCustom = (event) => {
+          const settings = event?.detail?.settings
+          listener(settings ? normalizeFeatureSettings(settings) : readFeatureSettings(target))
+        }
+        target.addEventListener('storage', onStorage)
+        target.addEventListener(FEATURE_SETTINGS_EVENT, onCustom)
+        return () => {
+          target.removeEventListener('storage', onStorage)
+          target.removeEventListener(FEATURE_SETTINGS_EVENT, onCustom)
+        }
+      }
+      return { normalizeFeatureSettings, loadFeatureSettingsResult, readFeatureSettings, writeFeatureSettings, notifyFeatureSettings, subscribeFeatureSettings, FeatureSettingsError, FEATURE_SETTINGS_KEY, FEATURE_SETTINGS_EVENT, FEATURE_SETTINGS_KEYS, DEFAULT_FEATURE_SETTINGS }
     }
     __defs["src/i18n.js"] = () => {
       /** Locale namespace and dictionaries for the Client half. */
@@ -2310,7 +2522,7 @@ window.__ModuleLoader__.load({
       /** Simplified Chinese is the key-set source of truth. */
       const zh = {
         'meta.title': 'DSH Toolbox',
-        'meta.description': '模型选择器增强（搜索与自定义分组）与请求身份改写（User-Agent / 请求头），分为两个页签。',
+        'meta.description': '模型选择器增强（搜索与自定义分组）与请求身份改写（User-Agent / 请求头），并提供其它设置与完整数据管理。',
         'search.placeholder': '搜索模型、提供方或 ID…',
         'search.clear': '清除搜索',
         'search.aria': '搜索模型',
@@ -2345,6 +2557,7 @@ window.__ModuleLoader__.load({
         'settings.tabs.aria': 'DSH Toolbox 功能页签',
         'settings.tabs.groups': '模型分组',
         'settings.tabs.identity': '请求身份改写',
+        'settings.tabs.other': '其它设置',
         'settings.catalog.title': '模型目录',
         'settings.catalog.summary': '已发现 {count} 个模型',
         'settings.catalog.empty': '打开一次模型选择器，这里就会出现可用模型。',
@@ -2377,6 +2590,11 @@ window.__ModuleLoader__.load({
         'settings.prefs.defaultView.all': '全部模型',
         'settings.prefs.defaultView.custom': '自定义分组',
         'settings.prefs.defaultView.provider': '原始 Provider 分组',
+        'settings.feature.modelGroups': '模型分组',
+        'settings.feature.modelGroupsHint': '模型搜索、自定义分组和模型菜单增强。',
+        'settings.feature.workspaceFlatToggle': '工作区单列表快捷切换',
+        'settings.feature.workspaceFlatToggleHint': '工作区标题栏中的单列表快捷按钮。',
+        'settings.feature.error': '功能开关保存失败：{message}',
         'settings.data.title': '配置数据',
         'settings.data.export': '导出 JSON',
         'settings.data.import': '导入 JSON',
@@ -2384,15 +2602,22 @@ window.__ModuleLoader__.load({
         'settings.data.download': '下载',
         'settings.data.chooseFile': '选择 JSON 文件…',
         'settings.data.restore': '恢复默认',
-        'settings.data.restoreConfirm': '恢复默认配置？当前分组关系会被覆盖。',
-        'settings.data.importHint': '粘贴 JSON 或选择文件。校验失败会保留旧配置。',
+        'settings.data.restoreConfirm': '恢复全部插件数据的默认值？模型分组、缓存、视图偏好、功能开关和请求身份规则都会被覆盖。',
+        'settings.data.importHint': '粘贴完整数据 JSON 或旧版模型配置 JSON，也可选择文件；旧版格式只更新模型分组。',
         'settings.data.importPlaceholder': '在此粘贴导出的 JSON…',
         'settings.data.importSuccess': '配置已导入',
         'settings.data.importError': '导入失败：{message}',
-        'settings.data.exportHint': '导出内容只包含分组、视图和模型 key，不包含凭据。',
+        'settings.data.exportError': '导出失败：{message}',
+        'settings.data.downloaded': '完整数据已下载',
+        'settings.data.exportReady': '完整数据已填入下方文本框，可手动复制。',
+        'settings.data.fileReadError': '无法读取 JSON 文件',
+        'settings.data.rollbackWarning': '导入失败且自动回滚未能确认完成；请检查本地数据与宿主身份规则后再重试。',
+        'settings.data.scope': '完整数据包含模型分组、模型目录缓存、工作区视图偏好、设置页偏好、功能开关和请求身份规则；不会包含宿主 provider 凭据或运行时命中统计。',
+        'settings.data.securityWarning': '安全提示：请求身份规则中的自定义请求头值也会随完整数据导出，请妥善保管导出的文件。',
+        'settings.data.exportHint': '粘贴完整数据 JSON 或旧版模型配置 JSON。校验失败或写入失败时会保留原数据。',
         'settings.data.saved': '已保存',
         'settings.data.copied': '已复制',
-        'settings.data.tooLarge': '文件超过 256 KiB 上限',
+        'settings.data.tooLarge': '文件超过完整数据大小上限',
         'settings.data.invalidJson': 'JSON 格式错误',
         'settings.data.unknownField': '包含未知字段',
         'settings.data.unsupportedVersion': '配置版本高于当前插件支持的版本',
@@ -2472,7 +2697,7 @@ window.__ModuleLoader__.load({
       /** English dictionary. */
       const en = {
         'meta.title': 'DSH Toolbox',
-        'meta.description': 'Searchable model picker with persistent custom groups.',
+        'meta.description': 'Model selector enhancements, request identity rewrite, and complete plugin data management across three settings pages.',
         'search.placeholder': 'Search models, providers, or IDs…',
         'search.clear': 'Clear search',
         'search.aria': 'Search models',
@@ -2507,6 +2732,7 @@ window.__ModuleLoader__.load({
         'settings.tabs.aria': 'DSH Toolbox feature tabs',
         'settings.tabs.groups': 'Model groups',
         'settings.tabs.identity': 'Request identity',
+        'settings.tabs.other': 'Other settings',
         'settings.catalog.title': 'Model catalog',
         'settings.catalog.summary': '{count} models discovered',
         'settings.catalog.empty': 'Open the model picker once to populate this catalog.',
@@ -2539,6 +2765,11 @@ window.__ModuleLoader__.load({
         'settings.prefs.defaultView.all': 'All models',
         'settings.prefs.defaultView.custom': 'Custom groups',
         'settings.prefs.defaultView.provider': 'Original provider groups',
+        'settings.feature.modelGroups': 'Model groups',
+        'settings.feature.modelGroupsHint': 'Model search, custom groups, and model-menu enhancements.',
+        'settings.feature.workspaceFlatToggle': 'Workspace flat-list shortcut',
+        'settings.feature.workspaceFlatToggleHint': 'The one-list shortcut in the workspace header.',
+        'settings.feature.error': 'Could not save feature switch: {message}',
         'settings.data.title': 'Configuration data',
         'settings.data.export': 'Export JSON',
         'settings.data.import': 'Import JSON',
@@ -2546,15 +2777,22 @@ window.__ModuleLoader__.load({
         'settings.data.download': 'Download',
         'settings.data.chooseFile': 'Choose JSON file…',
         'settings.data.restore': 'Restore defaults',
-        'settings.data.restoreConfirm': 'Restore defaults? Current group assignments will be replaced.',
-        'settings.data.importHint': 'Paste JSON or choose a file. A failed validation keeps the old configuration.',
+        'settings.data.restoreConfirm': 'Restore all plugin data to defaults? Model groups, cache, view preferences, feature switches, and request-identity rules will be replaced.',
+        'settings.data.importHint': 'Paste complete data JSON or legacy model configuration JSON, or choose a file. Legacy files update only model groups.',
         'settings.data.importPlaceholder': 'Paste exported JSON here…',
         'settings.data.importSuccess': 'Configuration imported',
         'settings.data.importError': 'Import failed: {message}',
-        'settings.data.exportHint': 'Exports group assignments, views, and model keys only; no credentials.',
+        'settings.data.exportError': 'Export failed: {message}',
+        'settings.data.downloaded': 'Complete data downloaded',
+        'settings.data.exportReady': 'Complete data is in the text box below for manual copying.',
+        'settings.data.fileReadError': 'Could not read the JSON file',
+        'settings.data.rollbackWarning': 'Import failed and automatic rollback could not be confirmed. Check local data and host identity rules before retrying.',
+        'settings.data.scope': 'Complete data includes model groups, the model catalog cache, workspace view preference, settings-tab preference, feature switches, and request-identity rules. Host provider credentials and runtime hit statistics are not included.',
+        'settings.data.securityWarning': 'Security note: custom header values in identity rules are included in complete exports. Keep exported files secure.',
+        'settings.data.exportHint': 'Paste complete data JSON or legacy model configuration JSON. Validation or write failures keep the existing data.',
         'settings.data.saved': 'Saved',
         'settings.data.copied': 'Copied',
-        'settings.data.tooLarge': 'File exceeds the 256 KiB limit',
+        'settings.data.tooLarge': 'The complete data file exceeds its size limit',
         'settings.data.invalidJson': 'Invalid JSON',
         'settings.data.unknownField': 'Unknown field',
         'settings.data.unsupportedVersion': 'Configuration version is newer than this plugin supports',
@@ -2940,9 +3178,13 @@ window.__ModuleLoader__.load({
         outline: 2px solid var(--dsw-alias-border-focus, #4d8dff);
         outline-offset: 2px;
       }
-      .dsh-toolbox-settings[data-tab="groups"] .dsh-toolbox-settings-page[data-page="identity"],
-      .dsh-toolbox-settings[data-tab="identity"] .dsh-toolbox-settings-page[data-page="groups"] {
+      .dsh-toolbox-settings .dsh-toolbox-settings-page {
         display: none;
+      }
+      .dsh-toolbox-settings[data-tab="groups"] .dsh-toolbox-settings-page[data-page="groups"],
+      .dsh-toolbox-settings[data-tab="identity"] .dsh-toolbox-settings-page[data-page="identity"],
+      .dsh-toolbox-settings[data-tab="other"] .dsh-toolbox-settings-page[data-page="other"] {
+        display: block;
       }
       .dsh-toolbox-settings h2 {
         margin: 0;
@@ -4522,7 +4764,8 @@ window.__ModuleLoader__.load({
       const BUTTON_BINDING_KEY = '__dshToolboxWorkspaceFlatToggleBinding'
       const DOCUMENT_OWNER_KEY = '__dshToolboxWorkspaceFlatToggleOwner'
       const FLAT = 'flat'
-      const GROUPED = new Set(['workspace', 'workspace-tree'])
+      const GROUPED_VIEW_MODES = Object.freeze(['workspace', 'workspace-tree'])
+      const GROUPED = new Set(GROUPED_VIEW_MODES)
 
       function safeStorage(windowObject, storage) {
         if (storage !== undefined) return storage
@@ -4893,7 +5136,11 @@ window.__ModuleLoader__.load({
           if (!this.store || !mode || typeof this.store.actions?.setGroupBy !== 'function') return
           try {
             if (mode === FLAT) {
-              const restoreMode = GROUPED.has(this.lastGroupedView) ? this.lastGroupedView : readLastGroupedView(this.storage)
+              const storedMode = normalizeGroupBy(readStorage(this.storage, LAST_GROUPED_VIEW_KEY))
+              const restoreMode = GROUPED.has(storedMode)
+                ? storedMode
+                : GROUPED.has(this.lastGroupedView) ? this.lastGroupedView : 'workspace'
+              this.lastGroupedView = restoreMode
               this.store.actions.setGroupBy(restoreMode)
             } else {
               this.lastGroupedView = mode
@@ -4994,7 +5241,422 @@ window.__ModuleLoader__.load({
       function createWorkspaceFlatToggleController(options) {
         return new WorkspaceFlatToggleController(options)
       }
-      return { normalizeGroupBy, readLastGroupedView, rememberGroupedView, findWorkspaceHeader, findNativeWorkspaceViewStore, createWorkspaceFlatToggleController, WorkspaceFlatToggleController, WORKSPACE_VIEW_PERSIST_KEY, LAST_GROUPED_VIEW_KEY, WORKSPACE_FLAT_TOGGLE_ATTRIBUTE, WORKSPACE_FLAT_HOST_ATTRIBUTE, WORKSPACE_FLAT_HOST_HIDDEN_ATTRIBUTE }
+      return { normalizeGroupBy, readLastGroupedView, rememberGroupedView, findWorkspaceHeader, findNativeWorkspaceViewStore, createWorkspaceFlatToggleController, WorkspaceFlatToggleController, WORKSPACE_VIEW_PERSIST_KEY, LAST_GROUPED_VIEW_KEY, WORKSPACE_FLAT_TOGGLE_ATTRIBUTE, WORKSPACE_FLAT_HOST_ATTRIBUTE, WORKSPACE_FLAT_HOST_HIDDEN_ATTRIBUTE, GROUPED_VIEW_MODES }
+    }
+    __defs["src/toolbox-data.js"] = () => {
+      /**
+       * Full export/import of data owned by DSH Toolbox.
+       *
+       * The envelope deliberately contains only plugin-owned persistence. Runtime
+       * identity hit statistics and host/provider credentials are not persisted here.
+       */
+
+      const { CATALOG_KEY, CONFIG_EVENT, STORAGE_KEY, CATALOG_EVENT, MAX_IMPORT_BYTES, createDefaultConfig, loadCatalogResult, loadConfigResult, normalizeCatalogPayload, normalizeConfig, notifyCatalogChanged, notifyConfigChanged } = __require("src/model-storage.js")
+      const { sanitizeIdentityConfig } = __require("src/identity-core.js")
+      const { createIdentityApi } = __require("src/identity-client.js")
+      const { LAST_GROUPED_VIEW_KEY, GROUPED_VIEW_MODES, normalizeGroupBy } = __require("src/workspace-flat-toggle.js")
+      const { normalizeSettingsTab, SETTINGS_TAB_KEY } = __require("src/settings-preferences.js")
+      const { DEFAULT_FEATURE_SETTINGS, FEATURE_SETTINGS_KEY, loadFeatureSettingsResult, normalizeFeatureSettings, notifyFeatureSettings } = __require("src/feature-settings.js")
+
+      const FULL_DATA_FORMAT = 'dsh-toolbox-data'
+      const FULL_DATA_VERSION = 1
+      const MAX_FULL_DATA_BYTES = 8 * 1024 * 1024
+
+      const FULL_KEYS = new Set(['format', 'version', 'exportedAt', 'local', 'identity'])
+      const LOCAL_KEYS = new Set(['modelConfig', 'catalog', 'workspace', 'settings', 'features'])
+      const WORKSPACE_KEYS = new Set(['lastGroupedView'])
+      const SETTINGS_KEYS = new Set(['tab'])
+      const IDENTITY_KEYS = new Set(['enabled', 'diagnostics', 'rules'])
+      const RULE_KEYS = new Set(['id', 'enabled', 'urlPattern', 'userAgent', 'headers', 'note'])
+      const HEADER_KEYS = new Set(['name', 'value'])
+
+      class ToolboxDataError extends Error {
+        constructor(code, message, path = '') {
+          super(message)
+          this.name = 'ToolboxDataError'
+          this.code = code
+          this.path = path
+        }
+      }
+
+      function isPlainObject(value) {
+        return typeof value === 'object' && value !== null && !Array.isArray(value)
+      }
+
+      function rejectUnknownKeys(value, allowed, path) {
+        if (!isPlainObject(value)) throw new ToolboxDataError('invalid-type', 'Expected a JSON object', path)
+        for (const key of Object.keys(value)) {
+          if (!allowed.has(key)) throw new ToolboxDataError('unknown-field', `Unknown field: ${key}`, path ? `${path}.${key}` : key)
+        }
+      }
+
+      function byteLength(text) {
+        if (typeof TextEncoder === 'function') return new TextEncoder().encode(text).byteLength
+        return unescape(encodeURIComponent(text)).length
+      }
+
+      function parseJsonText(text) {
+        if (typeof text !== 'string') throw new ToolboxDataError('invalid-type', 'Import must be a JSON string')
+        if (byteLength(text) > MAX_FULL_DATA_BYTES) {
+          throw new ToolboxDataError('too-large', `Import is larger than ${Math.round(MAX_FULL_DATA_BYTES / 1024)} KiB`)
+        }
+        try {
+          return JSON.parse(text)
+        } catch (error) {
+          throw new ToolboxDataError('invalid-json', `Invalid JSON: ${error instanceof Error ? error.message : String(error)}`)
+        }
+      }
+
+      function normalizeIdentityPayload(raw) {
+        rejectUnknownKeys(raw, IDENTITY_KEYS, 'identity')
+        if (typeof raw.enabled !== 'boolean' || typeof raw.diagnostics !== 'boolean' || !Array.isArray(raw.rules)) {
+          throw new ToolboxDataError('invalid-type', 'Expected enabled, diagnostics and rules', 'identity')
+        }
+        const rules = raw.rules
+        for (const [index, rule] of rules.entries()) {
+          const path = `identity.rules[${index}]`
+          rejectUnknownKeys(rule, RULE_KEYS, path)
+          if (typeof rule.id !== 'string' || typeof rule.enabled !== 'boolean' || typeof rule.urlPattern !== 'string' ||
+              typeof rule.userAgent !== 'string' || typeof rule.note !== 'string') {
+            throw new ToolboxDataError('invalid-type', 'Expected typed identity rule fields', path)
+          }
+          if (!Array.isArray(rule.headers)) throw new ToolboxDataError('invalid-type', 'Expected an array of headers', `${path}.headers`)
+          for (const [headerIndex, header] of rule.headers.entries()) {
+            const headerPath = `${path}.headers[${headerIndex}]`
+            rejectUnknownKeys(header, HEADER_KEYS, headerPath)
+            if (typeof header.name !== 'string' || typeof header.value !== 'string') {
+              throw new ToolboxDataError('invalid-type', 'Expected a string header name and value', headerPath)
+            }
+          }
+        }
+        const sanitized = sanitizeIdentityConfig(raw)
+        const lossy = rules.some((rule, index) => {
+          const saved = sanitized.value.rules[index]
+          return !saved || rule.id.trim() !== saved.id ||
+            rule.userAgent.trim() !== saved.userAgent ||
+            rule.note.trim() !== saved.note ||
+            rule.urlPattern.trim() !== saved.urlPattern ||
+            rule.headers.length !== saved.headers.length ||
+            rule.headers.some((header, headerIndex) =>
+              header.name.trim().toLowerCase() !== saved.headers[headerIndex]?.name ||
+              header.value !== saved.headers[headerIndex]?.value)
+        })
+        if (sanitized.errors.length > 0 || sanitized.droppedHeaders.length > 0 || lossy) {
+          const error = new ToolboxDataError('invalid-identity', 'Identity configuration is invalid or would lose header values', 'identity')
+          error.details = sanitized.errors
+          throw error
+        }
+        return sanitized.value
+      }
+
+      function normalizeWorkspace(raw) {
+        rejectUnknownKeys(raw, WORKSPACE_KEYS, 'local.workspace')
+        const mode = normalizeGroupBy(raw.lastGroupedView)
+        if (typeof raw.lastGroupedView !== 'string' || !GROUPED_VIEW_MODES.includes(mode)) {
+          throw new ToolboxDataError('invalid-workspace-view', 'The last grouped workspace view is invalid', 'local.workspace.lastGroupedView')
+        }
+        return { lastGroupedView: mode }
+      }
+
+      function normalizeSettings(raw) {
+        rejectUnknownKeys(raw, SETTINGS_KEYS, 'local.settings')
+        const tab = normalizeSettingsTab(raw.tab)
+        if (typeof raw.tab !== 'string' || tab === null) {
+          throw new ToolboxDataError('invalid-settings-tab', 'The settings tab is invalid', 'local.settings.tab')
+        }
+        return { tab }
+      }
+
+      function normalizeFeatures(raw, allowMissing = false) {
+        if (raw === undefined && allowMissing) return { ...DEFAULT_FEATURE_SETTINGS }
+        try {
+          return normalizeFeatureSettings(raw, { strict: true })
+        } catch (error) {
+          throw new ToolboxDataError(
+            error.code ?? 'invalid-feature-settings',
+            error.message ?? 'The feature settings are invalid',
+            error.path ? `local.features.${error.path}` : 'local.features',
+          )
+        }
+      }
+
+      /** Normalize and validate a complete export envelope. */
+      function normalizeFullData(raw) {
+        rejectUnknownKeys(raw, FULL_KEYS, '')
+        if (raw.format !== FULL_DATA_FORMAT) throw new ToolboxDataError('invalid-format', 'This is not a DSH Toolbox data file', 'format')
+        if (raw.version !== FULL_DATA_VERSION) throw new ToolboxDataError('unsupported-version', 'Unsupported DSH Toolbox data version', 'version')
+        if (typeof raw.exportedAt !== 'string' || Number.isNaN(Date.parse(raw.exportedAt))) {
+          throw new ToolboxDataError('invalid-export-time', 'The export timestamp is invalid', 'exportedAt')
+        }
+        rejectUnknownKeys(raw.local, LOCAL_KEYS, 'local')
+        const local = {
+          modelConfig: normalizeConfig(raw.local.modelConfig),
+          catalog: normalizeCatalogPayload(raw.local.catalog),
+          workspace: normalizeWorkspace(raw.local.workspace),
+          settings: normalizeSettings(raw.local.settings),
+          features: normalizeFeatures(raw.local.features, true),
+        }
+        return {
+          format: FULL_DATA_FORMAT,
+          version: FULL_DATA_VERSION,
+          exportedAt: raw.exportedAt,
+          local,
+          identity: normalizeIdentityPayload(raw.identity),
+        }
+      }
+
+      /** Parse a full envelope only. */
+      function parseFullDataText(text) {
+        return normalizeFullData(parseJsonText(text))
+      }
+
+      /** Parse either the new full envelope or the legacy model-only JSON. */
+      function parseToolboxDataText(text) {
+        const raw = parseJsonText(text)
+        if (isPlainObject(raw) && raw.format === FULL_DATA_FORMAT) {
+          return { kind: 'full', data: normalizeFullData(raw) }
+        }
+        // Keep the old model export size limit and never touch unrelated data.
+        if (byteLength(text) > MAX_IMPORT_BYTES) {
+          throw new ToolboxDataError('too-large', 'Legacy model configuration exceeds its import size limit')
+        }
+        return { kind: 'legacy', config: normalizeConfig(raw) }
+      }
+
+      function requireStorage(storage) {
+        if (!storage || typeof storage.getItem !== 'function' || typeof storage.setItem !== 'function' || typeof storage.removeItem !== 'function') {
+          throw new ToolboxDataError('storage-unavailable', 'Local storage is unavailable')
+        }
+        return storage
+      }
+
+      function readRaw(storage, key) {
+        try {
+          return storage.getItem(key)
+        } catch (error) {
+          throw new ToolboxDataError('storage-read-failed', `Could not read local storage: ${error?.message ?? String(error)}`, key)
+        }
+      }
+
+      function writeRaw(storage, key, value) {
+        if (value === null || value === undefined) {
+          storage.removeItem(key)
+          return
+        }
+        storage.setItem(key, value)
+      }
+
+      function captureLocal(storage) {
+        return new Map([STORAGE_KEY, CATALOG_KEY, LAST_GROUPED_VIEW_KEY, SETTINGS_TAB_KEY, FEATURE_SETTINGS_KEY].map((key) => [key, readRaw(storage, key)]))
+      }
+
+      function localPayload(storage, settingsTab = null) {
+        const config = loadConfigResult(storage)
+        const catalog = loadCatalogResult(storage)
+        if (config.error) throw new ToolboxDataError('corrupt-local-data', `Stored model configuration is invalid: ${config.error.message}`, STORAGE_KEY)
+        if (catalog.error) throw new ToolboxDataError('corrupt-local-data', `Stored model catalog is invalid: ${catalog.error.message}`, CATALOG_KEY)
+        let catalogPayload = { version: 1, updatedAt: 0, models: [] }
+        const catalogRaw = readRaw(storage, CATALOG_KEY)
+        if (catalogRaw !== null && catalogRaw !== '') {
+          try {
+            catalogPayload = normalizeCatalogPayload(JSON.parse(catalogRaw))
+          } catch (error) {
+            throw new ToolboxDataError('corrupt-local-data', `Stored model catalog cannot be exported losslessly: ${error.message}`, CATALOG_KEY)
+          }
+        }
+        const savedView = readRaw(storage, LAST_GROUPED_VIEW_KEY)
+        const savedTab = readRaw(storage, SETTINGS_TAB_KEY)
+        const featureResult = loadFeatureSettingsResult(storage, { strict: true })
+        if (savedView !== null && !GROUPED_VIEW_MODES.includes(savedView)) {
+          throw new ToolboxDataError('corrupt-local-data', 'Stored workspace view is invalid', LAST_GROUPED_VIEW_KEY)
+        }
+        if (savedTab !== null && normalizeSettingsTab(savedTab) === null) {
+          throw new ToolboxDataError('corrupt-local-data', 'Stored settings tab is invalid', SETTINGS_TAB_KEY)
+        }
+        if (featureResult.error) {
+          throw new ToolboxDataError(
+            'corrupt-local-data',
+            `Stored feature settings are invalid: ${featureResult.error.message}`,
+            FEATURE_SETTINGS_KEY,
+          )
+        }
+        return {
+          modelConfig: config.config,
+          catalog: catalogPayload,
+          workspace: { lastGroupedView: savedView ?? 'workspace' },
+          settings: { tab: normalizeSettingsTab(settingsTab) ?? savedTab ?? 'groups' },
+          features: featureResult.settings,
+        }
+      }
+
+      function makeData(local, identity, exportedAt = new Date().toISOString()) {
+        return normalizeFullData({
+          format: FULL_DATA_FORMAT,
+          version: FULL_DATA_VERSION,
+          exportedAt,
+          local,
+          identity,
+        })
+      }
+
+      function checkedIdentitySnapshot(snapshot, requireWritable = false) {
+        if (snapshot?.ok !== true || !isPlainObject(snapshot.value) ||
+            !Number.isSafeInteger(snapshot.revision) || snapshot.revision < 0) {
+          throw new ToolboxDataError('invalid-host-snapshot', 'The host identity response is incomplete')
+        }
+        if (requireWritable && snapshot.writable === false) {
+          throw new ToolboxDataError('identity-read-only', 'The host identity settings are read-only')
+        }
+        return { value: normalizeIdentityPayload(snapshot.value), revision: snapshot.revision }
+      }
+
+      /** Build the complete data object, including the current host identity value. */
+      async function buildFullData(storage, options = {}) {
+        const target = options.window ?? options.target ?? globalThis
+        const identityApi = options.identityApi ?? createIdentityApi(target)
+        const checkedStorage = requireStorage(storage)
+        const current = checkedIdentitySnapshot(await identityApi.read())
+        return makeData(localPayload(checkedStorage, options.settingsTab), current.value, options.exportedAt)
+      }
+
+      /** Serialize the complete data object for copy/download. */
+      async function exportToolboxData(storage, options = {}) {
+        const text = `${JSON.stringify(await buildFullData(storage, options), null, 2)}\n`
+        if (byteLength(text) > MAX_FULL_DATA_BYTES) {
+          throw new ToolboxDataError('too-large', 'The complete data export exceeds the import size limit')
+        }
+        return text
+      }
+
+      function localStoragePayload(data) {
+        return {
+          [STORAGE_KEY]: JSON.stringify(data.local.modelConfig),
+          [CATALOG_KEY]: JSON.stringify(data.local.catalog),
+          [LAST_GROUPED_VIEW_KEY]: data.local.workspace.lastGroupedView,
+          [SETTINGS_TAB_KEY]: data.local.settings.tab,
+          [FEATURE_SETTINGS_KEY]: JSON.stringify(data.local.features),
+        }
+      }
+
+      function notifyLocal(target, data) {
+        if (!target) return
+        notifyConfigChanged(target, data.local.modelConfig)
+        notifyCatalogChanged(target, data.local.catalog.models)
+        notifyFeatureSettings(target, data.local.features)
+      }
+
+      async function applyFullData(storage, data, options = {}) {
+        const target = options.window ?? options.target ?? null
+        const identityApi = options.identityApi ?? createIdentityApi(target ?? globalThis)
+        const checkedStorage = requireStorage(storage)
+        const currentIdentity = checkedIdentitySnapshot(await identityApi.read(), true)
+        const values = localStoragePayload(data)
+        let previous = null
+        let hostSaveAttempted = false
+        let identityRevision = currentIdentity.revision
+        try {
+          // Commit the host first: local readers cannot observe four new keys while
+          // a potentially slow HTTP save is still in progress.
+          hostSaveAttempted = true
+          const savedIdentity = checkedIdentitySnapshot(await identityApi.save(data.identity, currentIdentity.revision))
+          if (savedIdentity.revision <= currentIdentity.revision ||
+              JSON.stringify(savedIdentity.value) !== JSON.stringify(data.identity)) {
+            throw new ToolboxDataError('invalid-host-snapshot', 'The host did not confirm the imported identity value')
+          }
+          identityRevision = savedIdentity.revision
+          // Snapshot immediately before the synchronous local commit. An edit made
+          // during the host request is not an old value to roll back over.
+          previous = captureLocal(checkedStorage)
+          for (const [key, value] of Object.entries(values)) checkedStorage.setItem(key, value)
+        } catch (error) {
+          const rollbackErrors = []
+          for (const [key, value] of [...(previous ?? [])].reverse()) {
+            try {
+              const live = readRaw(checkedStorage, key)
+              if (live !== values[key] && live !== value) {
+                throw new ToolboxDataError('local-rollback-conflict', 'Local data changed during import; manual recovery may be required', key)
+              }
+              if (live !== value) writeRaw(checkedStorage, key, value)
+              if (readRaw(checkedStorage, key) !== value) {
+                throw new ToolboxDataError('local-rollback-failed', 'Local rollback could not be verified', key)
+              }
+            } catch (rollbackError) {
+              rollbackErrors.push(rollbackError)
+            }
+          }
+          if (rollbackErrors.length > 0) error.rollbackError = new AggregateError(rollbackErrors, 'Local data rollback was incomplete')
+          if (hostSaveAttempted) {
+            try {
+              const latest = checkedIdentitySnapshot(await identityApi.read())
+              if (latest.revision !== currentIdentity.revision &&
+                  JSON.stringify(latest.value) === JSON.stringify(data.identity)) {
+                const restored = checkedIdentitySnapshot(await identityApi.save(currentIdentity.value, latest.revision))
+                if (restored.revision <= latest.revision ||
+                    JSON.stringify(restored.value) !== JSON.stringify(currentIdentity.value)) {
+                  throw new ToolboxDataError('identity-rollback-failed', 'Host identity rollback could not be verified')
+                }
+              } else if (latest.revision !== currentIdentity.revision ||
+                         JSON.stringify(latest.value) !== JSON.stringify(currentIdentity.value)) {
+                throw new ToolboxDataError('identity-rollback-conflict', 'Host identity changed during import; manual recovery may be required')
+              }
+            } catch (rollbackError) {
+              error.identityRollbackError = rollbackError
+            }
+          }
+          throw error
+        }
+        notifyLocal(target, data)
+        return { data, identityRevision }
+      }
+
+      /** Apply either a complete envelope or a legacy model-only configuration. */
+      async function importToolboxData(storage, text, options = {}) {
+        const parsed = parseToolboxDataText(text)
+        if (parsed.kind === 'legacy') {
+          const checkedStorage = requireStorage(storage)
+          const previous = readRaw(checkedStorage, STORAGE_KEY)
+          try {
+            checkedStorage.setItem(STORAGE_KEY, JSON.stringify(parsed.config))
+          } catch (error) {
+            try {
+              writeRaw(checkedStorage, STORAGE_KEY, previous)
+            } catch (rollbackError) {
+              error.rollbackError = rollbackError
+            }
+            throw error
+          }
+          notifyConfigChanged(options.window ?? options.target ?? null, parsed.config)
+          return { kind: 'legacy', config: parsed.config }
+        }
+        return { kind: 'full', ...(await applyFullData(storage, parsed.data, options)) }
+      }
+
+      /** Restore every plugin-owned persistent value to a fresh-install default. */
+      async function resetToolboxData(storage, options = {}) {
+        const data = makeData(
+          {
+            modelConfig: createDefaultConfig(),
+            catalog: { version: 1, updatedAt: 0, models: [] },
+            workspace: { lastGroupedView: 'workspace' },
+            settings: { tab: 'groups' },
+            features: { ...DEFAULT_FEATURE_SETTINGS },
+          },
+          { enabled: true, diagnostics: false, rules: [] },
+        )
+        return { kind: 'full', ...(await applyFullData(storage, data, options)) }
+      }
+
+      /** Expose the local key names for tests and diagnostics without exposing values. */
+      const TOOLBOX_DATA_KEYS = Object.freeze({
+        STORAGE_KEY,
+        CATALOG_KEY,
+        LAST_GROUPED_VIEW_KEY,
+        SETTINGS_TAB_KEY,
+        FEATURE_SETTINGS_KEY,
+        CONFIG_EVENT,
+        CATALOG_EVENT,
+      })
+      return { normalizeFullData, parseFullDataText, parseToolboxDataText, buildFullData, exportToolboxData, importToolboxData, resetToolboxData, ToolboxDataError, FULL_DATA_FORMAT, FULL_DATA_VERSION, MAX_FULL_DATA_BYTES, TOOLBOX_DATA_KEYS }
     }
     __defs["src/settings-panel.js"] = () => {
       /**
@@ -5005,29 +5667,19 @@ window.__ModuleLoader__.load({
        */
 
       const { addGroup, cleanGroupName, modelsByProvider, moveGroup, removeGroup, removeMissingModelKeys, renameGroup, reorderGroups, setGroupCollapsed, setGroupModels, toggleModelInGroup } = __require("src/model-groups.js")
-      const { exportConfig, importConfig, loadCatalog, loadConfig, missingModelKeys, resetConfig, saveConfig, subscribeCatalog, subscribeConfig } = __require("src/model-storage.js")
+      const { loadCatalog, loadConfig, missingModelKeys, saveConfig, subscribeCatalog, subscribeConfig } = __require("src/model-storage.js")
       const { matchesQuery } = __require("src/model-groups.js")
       const { createIdentitySection } = __require("src/identity-client.js")
+      const { exportToolboxData, importToolboxData, resetToolboxData, ToolboxDataError, MAX_FULL_DATA_BYTES } = __require("src/toolbox-data.js")
+      const { SETTINGS_TAB_KEY: SETTINGS_TAB_STORAGE_KEY, readSettingsTab: readSettingsTabValue, writeSettingsTab: writeSettingsTabValue } = __require("src/settings-preferences.js")
+      const { readFeatureSettings, subscribeFeatureSettings, writeFeatureSettings } = __require("src/feature-settings.js")
 
-      /** Which sub-page of the toolbox settings tab is showing. */
-      const SETTINGS_TAB_KEY = 'dsh-toolbox:settings-tab:v1'
-
-      /** Read the remembered sub-page; anything unexpected falls back to groups. */
+      const SETTINGS_TAB_KEY = SETTINGS_TAB_STORAGE_KEY
       function readSettingsTab(storage) {
-        try {
-          return storage?.getItem?.(SETTINGS_TAB_KEY) === 'identity' ? 'identity' : 'groups'
-        } catch {
-          return 'groups'
-        }
+        return readSettingsTabValue(storage)
       }
-
-      /** Remember the sub-page (best effort; storage may be unavailable). */
       function writeSettingsTab(storage, tab) {
-        try {
-          storage?.setItem?.(SETTINGS_TAB_KEY, tab === 'identity' ? 'identity' : 'groups')
-        } catch {
-          // Losing the preference is harmless.
-        }
+        return writeSettingsTabValue(storage, tab)
       }
 
       function createSettingsPanel(React) {
@@ -5049,6 +5701,9 @@ window.__ModuleLoader__.load({
           const [nameDrafts, setNameDrafts] = useState({})
           const [importText, setImportText] = useState('')
           const [notice, setNotice] = useState(null) // { kind: 'ok' | 'error', message: string }
+          const [dataBusy, setDataBusy] = useState(false)
+          const [featureSettings, setFeatureSettings] = useState(() => readFeatureSettings(storage))
+          const [identityRefreshToken, setIdentityRefreshToken] = useState(0)
           const [draggedGroupId, setDraggedGroupId] = useState(null)
           const [dropTargetGroupId, setDropTargetGroupId] = useState(null)
           const fileInputRef = useRef(null)
@@ -5067,6 +5722,9 @@ window.__ModuleLoader__.load({
           // Keep state in sync with cross-component or cross-window updates
           useEffect(() => {
             if (!win) return
+            const offFeatureSettings = subscribeFeatureSettings(win, (nextSettings) => {
+              setFeatureSettings(nextSettings)
+            })
             const offConfig = subscribeConfig(win, (nextConfig) => {
               configRef.current = nextConfig
               setConfig(nextConfig)
@@ -5075,10 +5733,20 @@ window.__ModuleLoader__.load({
               setCatalog(nextCatalog)
             })
             return () => {
+              offFeatureSettings()
               offConfig()
               offCatalog()
             }
           }, [win])
+
+          const updateFeature = useCallback((name, enabled) => {
+            try {
+              const next = writeFeatureSettings(storage, { ...featureSettings, [name]: enabled }, win)
+              setFeatureSettings(next)
+            } catch (error) {
+              setNotice({ kind: 'error', message: t('settings.feature.error', { message: error.message }) })
+            }
+          }, [featureSettings, storage, t, win])
 
           const persistConfig = useCallback(
             (updater) => {
@@ -5209,86 +5877,126 @@ window.__ModuleLoader__.load({
             persistConfig((prev) => ({ ...prev, preserveProviderGroups: checked }))
           }
 
-          const handleExport = () => {
-            const json = exportConfig(config)
-            setImportText(json)
-            if (win.navigator?.clipboard?.writeText) {
-              win.navigator.clipboard.writeText(json).catch(() => {})
-            }
-            setNotice({ kind: 'ok', message: t('settings.data.copied') })
+          const dataErrorText = (error) => {
+            if (error?.rollbackError || error?.identityRollbackError) return t('settings.data.rollbackWarning')
+            if (error instanceof ToolboxDataError && error.code === 'storage-unavailable') return t('settings.data.storageUnavailable')
+            return error?.message || String(error)
           }
 
-          const handleDownload = () => {
-            const json = exportConfig(config)
+          const handleExport = async () => {
+            setDataBusy(true)
             try {
-              const blob = new Blob([json], { type: 'application/json' })
-              const url = URL.createObjectURL(blob)
-              const a = document.createElement('a')
-              a.href = url
-              a.download = `dsh-toolbox-config-${new Date().toISOString().slice(0, 10)}.json`
-              a.click()
-              URL.revokeObjectURL(url)
+              const json = await exportToolboxData(storage, { window: win, settingsTab: activeTab })
+              setImportText(json)
+              let copied = false
+              if (win.navigator?.clipboard?.writeText) {
+                try {
+                  await win.navigator.clipboard.writeText(json)
+                  copied = true
+                } catch {
+                  // The JSON remains available in the textarea for manual copying.
+                }
+              }
+              setNotice({ kind: 'ok', message: t(copied ? 'settings.data.copied' : 'settings.data.exportReady') })
             } catch (err) {
-              setNotice({ kind: 'error', message: String(err) })
+              setNotice({ kind: 'error', message: t('settings.data.exportError', { message: dataErrorText(err) }) })
+            } finally {
+              setDataBusy(false)
             }
           }
 
-          const handleImport = () => {
-            if (!importText.trim()) return
+          const handleDownload = async () => {
+            setDataBusy(true)
             try {
-              const imported = importConfig(storage, importText, win)
-              setConfig(imported)
-              setNameDrafts({})
-              setNotice({ kind: 'ok', message: t('settings.data.importSuccess') })
+              const json = await exportToolboxData(storage, { window: win, settingsTab: activeTab })
+              const BlobConstructor = win.Blob ?? globalThis.Blob
+              const URLConstructor = win.URL ?? globalThis.URL
+              const doc = win.document ?? globalThis.document
+              const blob = new BlobConstructor([json], { type: 'application/json' })
+              const url = URLConstructor.createObjectURL(blob)
+              const a = doc.createElement('a')
+              a.href = url
+              a.download = `dsh-toolbox-data-${new Date().toISOString().slice(0, 10)}.json`
+              a.click()
+              URLConstructor.revokeObjectURL(url)
+              setNotice({ kind: 'ok', message: t('settings.data.downloaded') })
+            } catch (err) {
+              setNotice({ kind: 'error', message: t('settings.data.exportError', { message: dataErrorText(err) }) })
+            } finally {
+              setDataBusy(false)
+            }
+          }
+
+          const applyImportedResult = (result) => {
+            const next = result?.data?.local?.modelConfig ?? result?.config
+            if (next) {
+              configRef.current = next
+              setConfig(next)
+            }
+            if (result?.data?.local?.catalog?.models) setCatalog(result.data.local.catalog.models)
+            setNameDrafts({})
+            if (result?.kind === 'full') {
+              setActiveTab(result.data.local.settings.tab)
+              setFeatureSettings(result.data.local.features)
+              setIdentityRefreshToken((value) => value + 1)
+            }
+            setNotice({ kind: 'ok', message: t('settings.data.importSuccess') })
+          }
+
+          const importTextValue = async (content) => {
+            if (!content.trim()) return
+            setDataBusy(true)
+            try {
+              const result = await importToolboxData(storage, content, { window: win })
+              applyImportedResult(result)
             } catch (err) {
               setNotice({
                 kind: 'error',
-                message: t('settings.data.importError', { message: err?.message || String(err) }),
+                message: t('settings.data.importError', { message: dataErrorText(err) }),
               })
+            } finally {
+              setDataBusy(false)
             }
           }
+
+          const handleImport = () => importTextValue(importText)
 
           const handleFileImport = (e) => {
             const file = e.target?.files?.[0]
             if (!file) return
             const input = e.target
-            const reader = new FileReader()
+            if (file.size > MAX_FULL_DATA_BYTES) {
+              input.value = ''
+              setNotice({ kind: 'error', message: t('settings.data.importError', { message: t('settings.data.tooLarge') }) })
+              return
+            }
+            const reader = new (win.FileReader ?? globalThis.FileReader)()
             reader.onload = (event) => {
               const content = event.target?.result
               if (typeof content === 'string') {
                 setImportText(content)
-                try {
-                  const imported = importConfig(storage, content, win)
-                  setConfig(imported)
-                  setNameDrafts({})
-                  setNotice({ kind: 'ok', message: t('settings.data.importSuccess') })
-                } catch (err) {
-                  setNotice({
-                    kind: 'error',
-                    message: t('settings.data.importError', { message: err?.message || String(err) }),
-                  })
-                }
+                void importTextValue(content)
               }
               input.value = ''
             }
             reader.onerror = () => {
               input.value = ''
+              setNotice({ kind: 'error', message: t('settings.data.importError', { message: t('settings.data.fileReadError') }) })
             }
             reader.readAsText(file)
           }
 
-          const handleReset = () => {
+          const handleReset = async () => {
             if (win.confirm && !win.confirm(t('settings.data.restoreConfirm'))) return
+            setDataBusy(true)
             try {
-              const fresh = resetConfig(storage, win)
-              setConfig(fresh)
-              setNameDrafts({})
-              setNotice({ kind: 'ok', message: t('settings.saved') })
+              const result = await resetToolboxData(storage, { window: win })
+              applyImportedResult(result)
+              setActiveTab('groups')
             } catch (err) {
-              setNotice({
-                kind: 'error',
-                message: t('settings.data.storageError', { message: err?.message || String(err) }),
-              })
+              setNotice({ kind: 'error', message: t('settings.data.importError', { message: dataErrorText(err) }) })
+            } finally {
+              setDataBusy(false)
             }
           }
 
@@ -5356,76 +6064,93 @@ window.__ModuleLoader__.load({
               ),
             ),
 
-            // Sub-page tabs: model groups vs. request identity
+            // Sub-page tabs
             h(
               'div',
               { className: 'dsh-toolbox-settings-tabs', role: 'tablist', 'aria-label': t('settings.tabs.aria') },
-              h(
-                'button',
-                {
-                  type: 'button',
-                  role: 'tab',
-                  className: 'dsh-toolbox-settings-tab',
-                  'data-tab': 'groups',
-                  'data-active': activeTab === 'groups' ? 'true' : 'false',
-                  'aria-selected': activeTab === 'groups' ? 'true' : 'false',
-                  onClick: () => setActiveTab('groups'),
-                },
-                t('settings.tabs.groups'),
-              ),
-              h(
-                'button',
-                {
-                  type: 'button',
-                  role: 'tab',
-                  className: 'dsh-toolbox-settings-tab',
-                  'data-tab': 'identity',
-                  'data-active': activeTab === 'identity' ? 'true' : 'false',
-                  'aria-selected': activeTab === 'identity' ? 'true' : 'false',
-                  onClick: () => setActiveTab('identity'),
-                },
-                t('settings.tabs.identity'),
+              ['groups', 'identity', 'other'].map((tab) =>
+                h(
+                  'button',
+                  {
+                    key: tab,
+                    type: 'button',
+                    role: 'tab',
+                    className: 'dsh-toolbox-settings-tab',
+                    'data-tab': tab,
+                    'data-active': activeTab === tab ? 'true' : 'false',
+                    'aria-selected': activeTab === tab ? 'true' : 'false',
+                    onClick: () => setActiveTab(tab),
+                  },
+                  t(`settings.tabs.${tab}`),
+                ),
               ),
             ),
+
+            notice
+              ? h(
+                  'div',
+                  {
+                    className: 'dsh-toolbox-notice',
+                    'data-kind': notice.kind,
+                  },
+                  notice.message,
+                )
+              : null,
 
             // Page: model groups
             h(
               'div',
               { className: 'dsh-toolbox-settings-page', 'data-page': 'groups' },
 
-              // Notification bar
-              notice
-                ? h(
-                    'div',
-                    {
-                      className: 'dsh-toolbox-notice',
-                      'data-kind': notice.kind,
-                    },
-                    notice.message,
-                  )
-                : null,
-
-              // Section 1: Catalog Status
+              // Section 1: Model groups feature switch
               h(
                 'div',
                 { className: 'dsh-toolbox-card' },
                 h(
                   'div',
-                  { className: 'dsh-toolbox-card-head' },
-                  h('h3', { className: 'dsh-toolbox-card-title' }, t('settings.catalog.title')),
+                  { className: 'dsh-toolbox-pref' },
                   h(
-                    'span',
-                    { className: 'dsh-toolbox-count' },
-                    t('settings.catalog.summary', { count: catalog.length }),
+                    'div',
+                    { className: 'dsh-toolbox-pref-copy' },
+                    h('div', { className: 'dsh-toolbox-pref-title' }, t('settings.feature.modelGroups')),
+                    h('div', { className: 'dsh-toolbox-muted' }, t('settings.feature.modelGroupsHint')),
                   ),
+                  h('input', {
+                    type: 'checkbox',
+                    className: 'dsh-toolbox-switch',
+                    'data-feature': 'modelGroups',
+                    checked: featureSettings.modelGroups,
+                    disabled: dataBusy,
+                    onChange: (event) => updateFeature('modelGroups', event.target.checked),
+                  }),
                 ),
-                catalog.length === 0
-                  ? h('p', { className: 'dsh-toolbox-muted' }, t('settings.catalog.empty'))
-                  : h('p', { className: 'dsh-toolbox-muted' }, t('settings.catalog.hint')),
               ),
 
-              // Section 2: Preferences / Opening Behavior
-            h(
+              featureSettings.modelGroups
+                ? h(
+                    React.Fragment,
+                    null,
+                    // Section 2: Catalog Status
+                    h(
+                      'div',
+                      { className: 'dsh-toolbox-card' },
+                      h(
+                        'div',
+                        { className: 'dsh-toolbox-card-head' },
+                        h('h3', { className: 'dsh-toolbox-card-title' }, t('settings.catalog.title')),
+                        h(
+                          'span',
+                          { className: 'dsh-toolbox-count' },
+                          t('settings.catalog.summary', { count: catalog.length }),
+                        ),
+                      ),
+                      catalog.length === 0
+                        ? h('p', { className: 'dsh-toolbox-muted' }, t('settings.catalog.empty'))
+                        : h('p', { className: 'dsh-toolbox-muted' }, t('settings.catalog.hint')),
+                    ),
+
+                    // Section 3: Preferences / Opening Behavior
+                    h(
               'div',
               { className: 'dsh-toolbox-card' },
               h('div', { className: 'dsh-toolbox-card-head' }, h('h3', { className: 'dsh-toolbox-card-title' }, t('settings.prefs.title'))),
@@ -5487,7 +6212,7 @@ window.__ModuleLoader__.load({
               ),
             ),
 
-            // Section 3: Custom Group Management
+            // Section 4: Custom Group Management
             h(
               'div',
               { className: 'dsh-toolbox-card' },
@@ -5713,7 +6438,7 @@ window.__ModuleLoader__.load({
                   ),
             ),
 
-            // Section 4: Stale Model Keys Warning & Cleanup
+            // Section 5: Stale Model Keys Warning & Cleanup
             staleKeys.length > 0
               ? h(
                   'div',
@@ -5749,95 +6474,120 @@ window.__ModuleLoader__.load({
                   ),
                 )
               : null,
-
-            // Section 5: Data Export / Import / Reset
-            h(
-              'div',
-              { className: 'dsh-toolbox-card' },
-              h(
-                'div',
-                { className: 'dsh-toolbox-card-head' },
-                h('h3', { className: 'dsh-toolbox-card-title' }, t('settings.data.title')),
-                h(
-                  'div',
-                  { className: 'dsh-toolbox-row' },
-                  h(
-                    'button',
-                    {
-                      type: 'button',
-                      className: 'dsh-toolbox-button',
-                      onClick: handleExport,
-                    },
-                    t('settings.data.copy'),
-                  ),
-                  h(
-                    'button',
-                    {
-                      type: 'button',
-                      className: 'dsh-toolbox-button',
-                      onClick: handleDownload,
-                    },
-                    t('settings.data.download'),
-                  ),
-                  h(
-                    'button',
-                    {
-                      type: 'button',
-                      className: 'dsh-toolbox-button',
-                      'data-variant': 'danger',
-                      onClick: handleReset,
-                    },
-                    t('settings.data.restore'),
-                  ),
-                ),
-              ),
-              h('p', { className: 'dsh-toolbox-muted' }, t('settings.data.importHint')),
-              h('textarea', {
-                className: 'dsh-toolbox-textarea',
-                style: { marginTop: 8 },
-                placeholder: t('settings.data.importPlaceholder'),
-                value: importText,
-                onChange: (e) => setImportText(e.target.value),
-              }),
-              h(
-                'div',
-                { className: 'dsh-toolbox-row', style: { marginTop: 8 } },
-                h(
-                  'button',
-                  {
-                    type: 'button',
-                    className: 'dsh-toolbox-button',
-                    'data-variant': 'primary',
-                    disabled: !importText.trim(),
-                    onClick: handleImport,
-                  },
-                  t('settings.data.import'),
-                ),
-                h('input', {
-                  type: 'file',
-                  accept: '.json',
-                  ref: fileInputRef,
-                  style: { display: 'none' },
-                  onChange: handleFileImport,
-                }),
-                h(
-                  'button',
-                  {
-                    type: 'button',
-                    className: 'dsh-toolbox-button',
-                    onClick: () => fileInputRef.current?.click(),
-                  },
-                  t('settings.data.chooseFile'),
-                ),
-              ),
-            ),
+                    )
+                  : null,
             ),
 
             // Page: request identity rewrite (host fetch patch)
             h(
               'div',
               { className: 'dsh-toolbox-settings-page', 'data-page': 'identity' },
-              h(IdentitySection, { key: 'identity', t, win }),
+              h(IdentitySection, { key: 'identity', t, win, refreshToken: identityRefreshToken }),
+            ),
+
+            // Page: other settings and full plugin data
+            h(
+              'div',
+              { className: 'dsh-toolbox-settings-page', 'data-page': 'other' },
+              h(
+                'div',
+                { className: 'dsh-toolbox-card' },
+                h(
+                  'div',
+                  { className: 'dsh-toolbox-pref' },
+                  h(
+                    'div',
+                    { className: 'dsh-toolbox-pref-copy' },
+                    h('div', { className: 'dsh-toolbox-pref-title' }, t('settings.feature.workspaceFlatToggle')),
+                    h('div', { className: 'dsh-toolbox-muted' }, t('settings.feature.workspaceFlatToggleHint')),
+                  ),
+                  h('input', {
+                    type: 'checkbox',
+                    className: 'dsh-toolbox-switch',
+                    'data-feature': 'workspaceFlatToggle',
+                    checked: featureSettings.workspaceFlatToggle,
+                    disabled: dataBusy,
+                    onChange: (event) => updateFeature('workspaceFlatToggle', event.target.checked),
+                  }),
+                ),
+              ),
+              h(
+                'div',
+                { className: 'dsh-toolbox-card' },
+                h(
+                  'div',
+                  { className: 'dsh-toolbox-card-head' },
+                  h('h3', { className: 'dsh-toolbox-card-title' }, t('settings.data.title')),
+                  h(
+                    'div',
+                    { className: 'dsh-toolbox-row' },
+                    h(
+                      'button',
+                      { type: 'button', className: 'dsh-toolbox-button', disabled: dataBusy, onClick: handleExport },
+                      t('settings.data.copy'),
+                    ),
+                    h(
+                      'button',
+                      { type: 'button', className: 'dsh-toolbox-button', disabled: dataBusy, onClick: handleDownload },
+                      t('settings.data.download'),
+                    ),
+                    h(
+                      'button',
+                      {
+                        type: 'button',
+                        className: 'dsh-toolbox-button',
+                        'data-variant': 'danger',
+                        disabled: dataBusy,
+                        onClick: handleReset,
+                      },
+                      t('settings.data.restore'),
+                    ),
+                  ),
+                ),
+                h('p', { className: 'dsh-toolbox-muted' }, t('settings.data.scope')),
+                h('p', { className: 'dsh-toolbox-identity-warn' }, t('settings.data.securityWarning')),
+                h('p', { className: 'dsh-toolbox-muted' }, t('settings.data.importHint')),
+                h('textarea', {
+                  className: 'dsh-toolbox-textarea',
+                  style: { marginTop: 8 },
+                  placeholder: t('settings.data.importPlaceholder'),
+                  value: importText,
+                  disabled: dataBusy,
+                  onChange: (e) => setImportText(e.target.value),
+                }),
+                h(
+                  'div',
+                  { className: 'dsh-toolbox-row', style: { marginTop: 8 } },
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'dsh-toolbox-button',
+                      'data-variant': 'primary',
+                      disabled: dataBusy || !importText.trim(),
+                      onClick: handleImport,
+                    },
+                    t('settings.data.import'),
+                  ),
+                  h('input', {
+                    type: 'file',
+                    accept: '.json',
+                    ref: fileInputRef,
+                    style: { display: 'none' },
+                    onChange: handleFileImport,
+                  }),
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'dsh-toolbox-button',
+                      disabled: dataBusy,
+                      onClick: () => fileInputRef.current?.click(),
+                    },
+                    t('settings.data.chooseFile'),
+                  ),
+                ),
+              ),
             ),
           )
         }
@@ -5857,6 +6607,7 @@ window.__ModuleLoader__.load({
       const { createModelSelectorController } = __require("src/model-selector.js")
       const { createWorkspaceFlatToggleController } = __require("src/workspace-flat-toggle.js")
       const { createSettingsPanel } = __require("src/settings-panel.js")
+      const { readFeatureSettings, subscribeFeatureSettings } = __require("src/feature-settings.js")
       const { NS, en, zh } = __require("src/i18n.js")
 
       /**
@@ -5865,6 +6616,14 @@ window.__ModuleLoader__.load({
        * host service. If the structure differs, the button stays on the menu and the
        * user can open Settings manually.
        */
+      function safeFeatureStorage(win) {
+        try {
+          return win?.localStorage ?? (typeof localStorage !== 'undefined' ? localStorage : null)
+        } catch {
+          return null
+        }
+      }
+
       function navigateToToolboxSettings(doc = globalThis.document) {
         if (!doc) return false
         const existing = doc.querySelector?.('div[role="dialog"][data-shortcut-modal="settings"]')
@@ -5928,16 +6687,69 @@ window.__ModuleLoader__.load({
         apply(ctx, helpers) {
           const doc = typeof document !== 'undefined' ? document : null
           const win = typeof window !== 'undefined' ? window : null
+          const storage = safeFeatureStorage(win)
           const controller = createWorkspaceFlatToggleController({
             document: doc,
             window: win,
+            storage,
             slots: ctx.slots,
             t: helpers.t,
             logger: ctx.logger ?? console,
           })
           helpers.workspaceFlatToggle = controller
-          if (doc) controller.start()
-          return () => controller.stop()
+          const sync = (settings) => {
+            if (settings.workspaceFlatToggle) controller.start()
+            else controller.stop()
+          }
+          const unsubscribe = subscribeFeatureSettings(win, sync)
+          sync(readFeatureSettings(storage))
+          return () => {
+            unsubscribe()
+            controller.stop()
+          }
+        },
+      }
+
+      const settingsPanelFeature = {
+        id: 'settings-panel',
+        name: 'Toolbox settings',
+        description: 'Register the DSH Toolbox settings page independently of optional feature switches.',
+        inject: ['slots', 'locale'],
+        defaultEnabled: true,
+
+        apply(ctx, helpers) {
+          const win = typeof window !== 'undefined' ? window : null
+          const storage = safeFeatureStorage(win)
+          const t = helpers.t
+          if (!helpers.React || !ctx.slots?.inject) return () => {}
+
+          const SettingsView = createSettingsPanel(helpers.React)
+          const Component = (props) =>
+            helpers.React.createElement(SettingsView, {
+              ...props,
+              t,
+              storage,
+              window: win,
+            })
+          const slotDisposer = ctx.slots.inject('settings.plugins.tab', () =>
+            ctx.slots.register(
+              {
+                name: 'settings.plugins.tab',
+                id: 'dsh-toolbox',
+                order: 20,
+                label: () => t('settings.tab'),
+                locale: NS,
+              },
+              Component,
+            ),
+          )
+          return () => {
+            try {
+              if (typeof slotDisposer === 'function') slotDisposer()
+            } catch {
+              // The slot owner may already be disposed during page teardown.
+            }
+          }
         },
       }
 
@@ -5956,9 +6768,8 @@ window.__ModuleLoader__.load({
         apply(ctx, helpers) {
           const doc = typeof document !== 'undefined' ? document : null
           const win = typeof window !== 'undefined' ? window : null
-          const storage = typeof localStorage !== 'undefined' ? localStorage : null
+          const storage = safeFeatureStorage(win)
           const t = helpers.t
-
           const controller = createModelSelectorController({
             document: doc,
             window: win,
@@ -5968,45 +6779,21 @@ window.__ModuleLoader__.load({
             logger: ctx.logger ?? console,
           })
           helpers.controller = controller
-          if (doc) controller.start()
-
-          let slotDisposer = null
-          if (helpers.React && ctx.slots?.inject) {
-            const SettingsView = createSettingsPanel(helpers.React)
-            const Component = (props) =>
-              helpers.React.createElement(SettingsView, {
-                ...props,
-                t,
-                storage,
-                window: win,
-              })
-            slotDisposer = ctx.slots.inject('settings.plugins.tab', () =>
-              ctx.slots.register(
-                {
-                  name: 'settings.plugins.tab',
-                  id: 'dsh-toolbox',
-                  order: 20,
-                  label: () => t('settings.tab'),
-                  locale: NS,
-                },
-                Component,
-              ),
-            )
+          const sync = (settings) => {
+            if (settings.modelGroups) controller.start()
+            else controller.stop()
           }
-
+          const unsubscribe = subscribeFeatureSettings(win, sync)
+          sync(readFeatureSettings(storage))
           return () => {
-            try {
-              if (typeof slotDisposer === 'function') slotDisposer()
-            } catch {
-              // The slot owner may already be disposed during page teardown.
-            }
+            unsubscribe()
             controller.stop()
           }
         },
       }
 
       /** Active features. Append `messageEditFeature` here in phase 2. */
-      const features = [modelGroupsFeature, workspaceFlatToggleFeature]
+      const features = [settingsPanelFeature, modelGroupsFeature, workspaceFlatToggleFeature]
 
       /**
        * Build the plugin face consumed by the Web module factory.
@@ -6056,7 +6843,7 @@ window.__ModuleLoader__.load({
           features,
         }
       }
-      return { navigateToToolboxSettings, createToolbox, workspaceFlatToggleFeature, modelGroupsFeature, features }
+      return { navigateToToolboxSettings, createToolbox, workspaceFlatToggleFeature, settingsPanelFeature, modelGroupsFeature, features }
     }
     const { createToolbox } = __require('src/features.js')
     const toolbox = createToolbox({ React })

@@ -286,9 +286,13 @@ export const css = String.raw`
   outline: 2px solid var(--dsw-alias-border-focus, #4d8dff);
   outline-offset: 2px;
 }
-.dsh-toolbox-settings[data-tab="groups"] .dsh-toolbox-settings-page[data-page="identity"],
-.dsh-toolbox-settings[data-tab="identity"] .dsh-toolbox-settings-page[data-page="groups"] {
+.dsh-toolbox-settings .dsh-toolbox-settings-page {
   display: none;
+}
+.dsh-toolbox-settings[data-tab="groups"] .dsh-toolbox-settings-page[data-page="groups"],
+.dsh-toolbox-settings[data-tab="identity"] .dsh-toolbox-settings-page[data-page="identity"],
+.dsh-toolbox-settings[data-tab="other"] .dsh-toolbox-settings-page[data-page="other"] {
+  display: block;
 }
 .dsh-toolbox-settings h2 {
   margin: 0;

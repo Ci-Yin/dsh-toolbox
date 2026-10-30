@@ -304,6 +304,47 @@ export function subscribeConfig(target, listener) {
   }
 }
 
+const CATALOG_KEYS = new Set(['version', 'updatedAt', 'models'])
+
+/** Normalize a serialized catalog payload for full-data export/import. */
+export function normalizeCatalogPayload(raw) {
+  if (!isPlainObject(raw) || raw.version !== 1 || !Array.isArray(raw.models)) {
+    throw new ConfigValidationError('invalid-catalog', 'Invalid catalog cache')
+  }
+  rejectUnknownKeys(raw, CATALOG_KEYS, 'catalog')
+  if (!Number.isSafeInteger(raw.updatedAt) || raw.updatedAt < 0) {
+    throw new ConfigValidationError('invalid-catalog', 'Invalid catalog timestamp', 'catalog.updatedAt')
+  }
+  if (raw.models.length > MAX_CATALOG_MODELS) {
+    throw new ConfigValidationError('too-many-models', 'Catalog cache is too large', 'catalog.models')
+  }
+  const models = []
+  const seen = new Set()
+  const modelKeys = new Set(['key', 'providerId', 'providerName', 'modelId', 'name'])
+  for (const [index, model] of raw.models.entries()) {
+    const path = `catalog.models[${index}]`
+    rejectUnknownKeys(model, modelKeys, path)
+    for (const field of modelKeys) {
+      if (typeof model[field] !== 'string') {
+        throw new ConfigValidationError('invalid-catalog', `Invalid catalog ${field}`, `${path}.${field}`)
+      }
+    }
+    const key = normalizeModelKey(model.key)
+    if (key === '' || key !== model.key || seen.has(key)) {
+      throw new ConfigValidationError('invalid-catalog', 'Invalid or duplicate catalog model key', `${path}.key`)
+    }
+    seen.add(key)
+    models.push({
+      key,
+      providerId: model.providerId,
+      providerName: model.providerName,
+      modelId: model.modelId,
+      name: model.name,
+    })
+  }
+  return { version: 1, updatedAt: raw.updatedAt, models }
+}
+
 /** Read the cached catalog snapshot; an absent or malformed cache is empty. */
 export function loadCatalogResult(storage) {
   const text = readText(storage, CATALOG_KEY)
@@ -342,17 +383,18 @@ export function loadCatalog(storage) {
   return loadCatalogResult(storage).models
 }
 
+/** Persist a complete catalog payload without changing its timestamp. */
+export function saveCatalogPayload(storage, payload, target = null) {
+  const normalized = normalizeCatalogPayload(payload)
+  writeText(storage, CATALOG_KEY, JSON.stringify(normalized))
+  if (target) notifyCatalogChanged(target, normalized.models)
+  return normalized
+}
+
 /** Persist the last observed catalog for the settings page. */
 export function saveCatalog(storage, models, target = null) {
   const snapshot = toCatalogSnapshot(Array.isArray(models) ? models : []).slice(0, MAX_CATALOG_MODELS)
-  const payload = {
-    version: 1,
-    updatedAt: Date.now(),
-    models: snapshot,
-  }
-  writeText(storage, CATALOG_KEY, JSON.stringify(payload))
-  if (target) notifyCatalogChanged(target, snapshot)
-  return payload
+  return saveCatalogPayload(storage, { version: 1, updatedAt: Date.now(), models: snapshot }, target)
 }
 
 /** Subscribe to same-window and cross-window catalog snapshots. */

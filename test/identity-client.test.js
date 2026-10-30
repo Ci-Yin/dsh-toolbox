@@ -77,6 +77,46 @@ test('the card renders its loading state without touching the network', () => {
   assert.match(html, /仅对你有权使用的服务使用/u)
 })
 
+test('disabling identity hides related settings and suppresses the success notice', async () => {
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', {
+    url: 'http://127.0.0.1:64370/',
+  })
+  const win = dom.window
+  globalThis.window = win
+  globalThis.document = win.document
+  const identity = { enabled: false, diagnostics: true, rules: [{ id: 'r1', enabled: true, urlPattern: 'example.com', userAgent: 'cli', headers: [], note: '' }] }
+  let revision = 1
+  win.fetch = async (path, init) => {
+    if (path === '/api/dsh-toolbox.identity' && (init?.method ?? 'GET') === 'GET') {
+      return { ok: true, status: 200, json: async () => ({ ok: true, writable: true, revision, value: identity, providers: [], stats: {} }) }
+    }
+    if (path === '/api/dsh-toolbox.identity' && init?.method === 'POST') {
+      const body = JSON.parse(init.body)
+      identity.enabled = body.value.enabled
+      revision += 1
+      return { ok: true, status: 200, json: async () => ({ ok: true, writable: true, revision, value: identity, providers: [], stats: {} }) }
+    }
+    throw new Error(`unexpected path ${path}`)
+  }
+
+  const IdentitySection = createIdentitySection(React)
+  const root = createRoot(win.document.getElementById('root'))
+  await act(async () => root.render(React.createElement(IdentitySection, { t, win })))
+  assert.doesNotMatch(win.document.querySelector('.dsh-toolbox-identity-body')?.textContent ?? '', /身份规则/u)
+  assert.doesNotMatch(win.document.querySelector('.dsh-toolbox-identity-body')?.textContent ?? '', /诊断模式/u)
+
+  const toggle = win.document.querySelector('input[data-feature="identity"]')
+  assert.ok(toggle)
+  assert.equal(toggle.checked, false)
+  await act(async () => Simulate.change(toggle, { target: { checked: true } }))
+  assert.match(win.document.body.textContent, /身份规则/u)
+  assert.match(win.document.body.textContent, /诊断日志/u)
+  assert.doesNotMatch(win.document.body.textContent, /已保存/u)
+
+  await act(async () => root.unmount())
+  dom.window.close()
+})
+
 test('the card loads host state, creates a provider rule, saves it, and probes it', async () => {
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', {
     url: 'http://127.0.0.1:64370/',
