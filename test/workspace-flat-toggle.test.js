@@ -16,17 +16,17 @@ import {
 } from '../src/workspace-flat-toggle.js'
 import { FakeStorage } from './helpers.js'
 
-function createWorkspaceDom({ hidden = false, language = 'zh', wrappedView = false } = {}) {
+function createWorkspaceDom({ hidden = false, language = 'zh', wrappedView = false, prefix = 'cIzfCa' } = {}) {
   const searchLabel = language === 'en' ? 'Search sessions' : '搜索会话'
   const viewLabel = language === 'en' ? 'View options' : '视图选项'
   const viewControl = `<button type="button" aria-label="${viewLabel}">视图选项</button>`
   const dom = new JSDOM(`<!doctype html><html><head></head><body>
     <main id="workspace">
-      <div class="cIzfCa_root">
-        <div class="cIzfCa_sectionHeader">
+      <div class="${prefix}_root">
+        <div class="${prefix}_sectionHeader">
           <span>工作区</span>
-          <div class="cIzfCa_searchSlot"><div class="search"><button type="button" aria-label="${searchLabel}" aria-expanded="${hidden ? 'true' : 'false'}">搜索</button></div></div>
-          <div class="cIzfCa_headerActions${hidden ? ' cIzfCa_headerActionsHidden' : ''}">
+          <div class="${prefix}_searchSlot"><div class="search"><button type="button" aria-label="${searchLabel}" aria-expanded="${hidden ? 'true' : 'false'}">搜索</button></div></div>
+          <div class="${prefix}_headerActions${hidden ? ` ${prefix}_headerActionsHidden` : ''}">
           ${wrappedView ? `<div class="native-view-trigger"><span class="tooltip">${viewControl}</span></div>` : viewControl}
             <button type="button" aria-label="添加工作区">+</button>
           </div>
@@ -88,12 +88,13 @@ function createSlots(store, { valid = true, live = true } = {}) {
   }
 }
 
-function createController(dom, store, storage, slots = createSlots(store)) {
+function createController(dom, store, storage, slots = createSlots(store), logger = undefined) {
   return new WorkspaceFlatToggleController({
     document: dom.window.document,
     window: dom.window,
     storage,
     slots,
+    logger,
     Observer: dom.window.MutationObserver,
     requestAnimationFrame: (callback) => callback(),
     cancelAnimationFrame: () => {},
@@ -111,6 +112,58 @@ test('finds exactly the native workspace header between search and view actions'
   assert.equal(header.viewButton.getAttribute('aria-label'), '视图选项')
   assert.equal(header.actions.classList.contains('cIzfCa_headerActions'), true)
   assert.equal(findWorkspaceHeader(new JSDOM('<body><button aria-label="View options"></button></body>').window.document), null)
+})
+
+test('finds the workspace header after the host CSS-module hash prefix changed', () => {
+  const dom = createWorkspaceDom({ prefix: '_9dHiBa' })
+  const header = findWorkspaceHeader(dom.window.document)
+  assert.ok(header)
+  assert.equal(header.viewButton.getAttribute('aria-label'), '视图选项')
+  assert.equal(header.actions.classList.contains('_9dHiBa_headerActions'), true)
+
+  const store = createStore('workspace-tree')
+  const controller = createController(dom, store, new FakeStorage())
+  controller.start()
+  const button = dom.window.document.querySelector(`[${WORKSPACE_FLAT_TOGGLE_ATTRIBUTE}="true"]`)
+  assert.ok(button)
+  assert.equal(button.parentElement, header.actions)
+  assert.equal(button.nextElementSibling, header.viewAnchor)
+  button.click()
+  assert.equal(store.getState().groupBy, 'flat')
+  assert.equal(button.getAttribute('aria-pressed'), 'true')
+  controller.stop()
+})
+
+test('matches hashed workspace classes by their stable camelCase key only', () => {
+  const dom = createWorkspaceDom({ prefix: 'a1B2c3' })
+  const header = findWorkspaceHeader(dom.window.document)
+  assert.ok(header)
+  assert.equal(header.header, dom.window.document.querySelector('.a1B2c3_sectionHeader'))
+
+  const renamed = createWorkspaceDom({ prefix: 'noKeyHere' })
+  for (const node of renamed.window.document.querySelectorAll('[class]')) {
+    node.setAttribute('class', node.getAttribute('class').replaceAll('noKeyHere_', 'noKeyHere-'))
+  }
+  assert.equal(findWorkspaceHeader(renamed.window.document), null)
+})
+
+test('warns once when the host renders workspace controls in an unrecognized shape', () => {
+  const dom = createWorkspaceDom({ prefix: 'noKeyHere' })
+  for (const node of dom.window.document.querySelectorAll('[class]')) {
+    node.setAttribute('class', node.getAttribute('class').replaceAll('noKeyHere_', 'noKeyHere-'))
+  }
+  const warnings = []
+  const store = createStore()
+  const controller = createController(dom, store, new FakeStorage(), createSlots(store), {
+    warn: (message) => warnings.push(message),
+  })
+  controller.start()
+  controller.scan()
+  controller.scan()
+  assert.equal(warnings.length, 1)
+  assert.match(warnings[0], /workspace header not recognized/u)
+  assert.equal(dom.window.document.querySelector(`[${WORKSPACE_FLAT_TOGGLE_ATTRIBUTE}="true"]`), null)
+  controller.stop()
 })
 
 test('finds only the matching native workspace store registration', () => {

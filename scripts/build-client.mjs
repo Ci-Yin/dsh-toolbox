@@ -98,7 +98,9 @@ function transform(id, source) {
 }
 
 const transformed = modules.map((id) => {
-  const source = readFileSync(resolve(packageRoot, id), 'utf-8')
+  // Normalize CRLF so a Windows checkout (core.autocrlf=true) produces exactly
+  // the LF bundle that is committed instead of a whitespace-only churn.
+  const source = readFileSync(resolve(packageRoot, id), 'utf-8').replace(/\r\n?/gu, '\n')
   return { id, ...transform(id, source) }
 })
 
@@ -142,7 +144,7 @@ if (check) {
     console.error('client.js is missing; run node scripts/build-client.mjs')
     process.exit(1)
   }
-  const current = readFileSync(target, 'utf-8')
+  const current = readFileSync(target, 'utf-8').replace(/\r\n?/gu, '\n')
   if (current !== bundle) {
     console.error('client.js is out of date; run node scripts/build-client.mjs')
     process.exit(1)

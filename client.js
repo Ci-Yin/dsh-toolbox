@@ -4815,15 +4815,28 @@ window.__ModuleLoader__.load({
         return String(node?.getAttribute?.('aria-label') ?? node?.getAttribute?.('title') ?? '').trim()
       }
 
-      const NATIVE_WORKSPACE_CLASSES = Object.freeze({
-        root: 'cIzfCa_root',
-        sectionHeader: 'cIzfCa_sectionHeader',
-        searchSlot: 'cIzfCa_searchSlot',
-        headerActions: 'cIzfCa_headerActions',
+      /**
+       * The host ships CSS-module class names whose hash prefix changes on every
+       * build — `cIzfCa_searchSlot` up to 0.2.1-rc.3, `_9dHiBa_searchSlot` from
+       * 0.2.1-rc.4 — while the camelCase key after the underscore stays the same.
+       * Match that stable key instead of a frozen hashed class, otherwise a host
+       * upgrade silently drops the shortcut.
+       */
+      const NATIVE_WORKSPACE_CLASS_KEYS = Object.freeze({
+        root: 'root',
+        sectionHeader: 'sectionHeader',
+        searchSlot: 'searchSlot',
+        headerActions: 'headerActions',
       })
 
-      function hasClass(node, className) {
-        return node?.classList?.contains?.(className) === true
+      function hasNativeClass(node, key) {
+        const raw = node?.getAttribute?.('class')
+        if (typeof raw !== 'string' || raw === '') return false
+        const suffix = `_${key}`
+        return raw
+          .trim()
+          .split(/\s+/)
+          .some((token) => token === key || token.endsWith(suffix))
       }
 
       function isSearchButton(node) {
@@ -4834,39 +4847,43 @@ window.__ModuleLoader__.load({
         return /视图选项|view options/i.test(ariaLabel(node))
       }
 
-      function directChildrenWithClass(parent, className) {
-        return [...(parent?.children ?? [])].filter((child) => hasClass(child, className))
+      function directChildrenWithKey(parent, key) {
+        return [...(parent?.children ?? [])].filter((child) => hasNativeClass(child, key))
       }
 
-      function findNativeWorkspaceHeader(root) {
-        const headers = directChildrenWithClass(root, NATIVE_WORKSPACE_CLASSES.sectionHeader)
-        if (headers.length !== 1) return null
-        const header = headers[0]
-        const searchSlots = directChildrenWithClass(header, NATIVE_WORKSPACE_CLASSES.searchSlot)
-        const actionGroups = directChildrenWithClass(header, NATIVE_WORKSPACE_CLASSES.headerActions)
-        if (searchSlots.length !== 1 || actionGroups.length !== 1) return null
-        const searchButtons = [...(searchSlots[0].querySelectorAll?.('button') ?? [])].filter(isSearchButton)
-        const viewButtons = [...(actionGroups[0].querySelectorAll?.('button[aria-label]') ?? [])].filter(isViewOptionsButton)
+      function describeWorkspaceHeader({ root, header, searchSlot, actions }) {
+        const searchButtons = [...(searchSlot.querySelectorAll?.('button') ?? [])].filter(isSearchButton)
+        const viewButtons = [...(actions.querySelectorAll?.('button[aria-label]') ?? [])].filter(isViewOptionsButton)
         if (searchButtons.length !== 1 || viewButtons.length !== 1) return null
         // The native control can be wrapped by a tooltip/menu trigger. insertBefore
         // requires a *direct* child of the action group, not the nested button.
         let viewAnchor = viewButtons[0]
-        while (viewAnchor?.parentElement && viewAnchor.parentElement !== actionGroups[0]) {
+        while (viewAnchor?.parentElement && viewAnchor.parentElement !== actions) {
           viewAnchor = viewAnchor.parentElement
         }
-        if (viewAnchor?.parentElement !== actionGroups[0]) return null
+        if (viewAnchor?.parentElement !== actions) return null
         if (viewAnchor.querySelectorAll?.('button').length !== (viewAnchor === viewButtons[0] ? 0 : 1)) return null
         const expanded = searchButtons[0].getAttribute?.('aria-expanded')
         if (expanded !== 'true' && expanded !== 'false') return null
         return {
           root,
           header,
-          searchSlot: searchSlots[0],
+          searchSlot,
           searchButton: searchButtons[0],
-          actions: actionGroups[0],
+          actions,
           viewButton: viewButtons[0],
           viewAnchor,
         }
+      }
+
+      function findNativeWorkspaceHeader(root) {
+        const headers = directChildrenWithKey(root, NATIVE_WORKSPACE_CLASS_KEYS.sectionHeader)
+        if (headers.length !== 1) return null
+        const header = headers[0]
+        const searchSlots = directChildrenWithKey(header, NATIVE_WORKSPACE_CLASS_KEYS.searchSlot)
+        const actionGroups = directChildrenWithKey(header, NATIVE_WORKSPACE_CLASS_KEYS.headerActions)
+        if (searchSlots.length !== 1 || actionGroups.length !== 1) return null
+        return describeWorkspaceHeader({ root, header, searchSlot: searchSlots[0], actions: actionGroups[0] })
       }
 
       /**
@@ -4876,7 +4893,9 @@ window.__ModuleLoader__.load({
        */
       function findWorkspaceHeader(doc = globalThis.document) {
         if (!doc?.querySelectorAll) return null
-        const roots = [...doc.querySelectorAll(`.${NATIVE_WORKSPACE_CLASSES.root}`)]
+        const roots = [...doc.querySelectorAll('[class*="_root"]')].filter((node) =>
+          hasNativeClass(node, NATIVE_WORKSPACE_CLASS_KEYS.root),
+        )
         const candidates = roots.map(findNativeWorkspaceHeader).filter(Boolean)
         return candidates.length === 1 ? candidates[0] : null
       }
@@ -4968,6 +4987,7 @@ window.__ModuleLoader__.load({
           this.actions = null
           this.scheduled = false
           this.frameHandle = null
+          this.missingHeaderWarned = false
           this.refresh = this.refresh.bind(this)
           this.scan = this.scan.bind(this)
           this.toggle = this.toggle.bind(this)
@@ -5205,8 +5225,10 @@ window.__ModuleLoader__.load({
           const header = findWorkspaceHeader(this.doc)
           if (!header || !this.store || !this.currentMode()) {
             this.removeOwnButtons()
+            this.reportUnrecognizedHeader(header === null)
             return
           }
+          this.missingHeaderWarned = false
           let button = [...(header.actions.querySelectorAll?.(`[${WORKSPACE_FLAT_TOGGLE_ATTRIBUTE}="true"]`) ?? [])][0] ?? null
           if (!button) button = this.createButton()
           this.removeOwnButtons(button)
@@ -5225,6 +5247,21 @@ window.__ModuleLoader__.load({
           this.actions = header.actions
           this.bindButton(button)
           this.updateButton()
+        }
+
+        /**
+         * Warn once when the host renders its workspace browser but the header shape
+         * is no longer recognized, so a silent regression after a host upgrade leaves
+         * a trace instead of an unexplained missing button.
+         */
+        reportUnrecognizedHeader(missing) {
+          if (!missing || this.missingHeaderWarned) return
+          const controls = [...(this.doc?.querySelectorAll?.('button[aria-label]') ?? [])]
+          if (!controls.some(isSearchButton) || !controls.some(isViewOptionsButton)) return
+          this.missingHeaderWarned = true
+          this.logger?.warn?.(
+            '[dsh-toolbox] workspace header not recognized; the workspace flat toggle stays hidden',
+          )
         }
 
         updateButton() {
