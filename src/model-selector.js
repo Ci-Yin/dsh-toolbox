@@ -1086,7 +1086,7 @@ export class ModelSelectorController {
         // renders the new view, then avoid a second full pass below.
         this.config = next
         this.config = saveConfig(this.storage, next, this.win)
-        refreshAfterWrite = false
+        refreshAfterWrite = typeof this.unsubscribeConfig !== 'function'
       } else {
         this.config = next
       }
