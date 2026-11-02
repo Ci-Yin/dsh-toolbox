@@ -190,6 +190,10 @@ export const css = String.raw`
   background: var(--dsw-alias-bg-hover, rgba(127, 127, 127, .08));
   border-radius: 4px;
 }
+/* Keep the host's sticky provider label transparent while it is pinned. */
+[data-menu-group-heading][data-stuck] {
+  background: transparent !important;
+}
 .dsh-toolbox-group-toggle {
   display: inline-flex;
   align-items: center;
