@@ -3924,6 +3924,7 @@ window.__ModuleLoader__.load({
             if (root) {
               this.observer = new this.Observer((mutations) => {
                 if (mutations.every(isOwnMutation)) return
+                if (!mutations.some((mutation) => this.mutationAffectsMenu(mutation))) return
                 this.schedule()
               })
               this.observer.observe(root, { childList: true, subtree: true })
@@ -3972,6 +3973,32 @@ window.__ModuleLoader__.load({
             this.frameHandle = null
             this.scan()
           })
+        }
+
+        /** Return whether a host mutation can change a known menu or reveal one. */
+        mutationAffectsMenu(mutation) {
+          const added = [...(mutation?.addedNodes ?? [])]
+          const revealsMenu = added.some((node) =>
+            node?.nodeType === 1 && (node.matches?.('[role="menu"]') || node.querySelector?.('[role="menu"]')),
+          )
+          if (revealsMenu) return true
+          if (this.records.size === 0) return false
+          const target = mutation?.target
+          const removed = [...(mutation?.removedNodes ?? [])]
+          for (const record of this.records.values()) {
+            const menu = record.menu
+            const root = record.root
+            const targetAffects =
+              target === menu || target === root || menu?.contains?.(target) || root?.contains?.(target)
+            const nodeAffects = [...added, ...removed].some((node) =>
+              node === menu || node === root || menu?.contains?.(node) || node?.contains?.(menu),
+            )
+            if (targetAffects || nodeAffects) {
+              record.catalogDirty = true
+              return true
+            }
+          }
+          return false
         }
 
         /** Find open model panes and make sure each one is enhanced. */
@@ -4048,6 +4075,8 @@ window.__ModuleLoader__.load({
             menu,
             root: parent,
             catalog,
+            catalogFingerprint: null,
+            catalogDirty: false,
             external,
             externalInput: null,
             nativeSearch: null,
@@ -4187,14 +4216,19 @@ window.__ModuleLoader__.load({
             setHidden(row, true)
           }
 
-          this.refreshRecord(record)
+          // The scan pass refreshes every record after all menus have been discovered.
+          // Keep the initial construction free of a second immediate DOM pass.
           return record
         }
 
         /** Recompute one record from the live DOM and the current config. */
         refreshRecord(record) {
           if (!record?.menu || !connected(record.menu, this.doc)) return
-          record.catalog = readModelCatalog(record.menu)
+          if (record.catalogDirty) {
+            record.catalog = readModelCatalog(record.menu)
+            record.catalogDirty = false
+            record.catalogFingerprint = null
+          }
           record.view = buildViewModel(record.catalog.models, this.config, {
             query: record.query,
             activeGroupId: record.activeGroupId,
@@ -4348,7 +4382,12 @@ window.__ModuleLoader__.load({
             !view.searching &&
             (view.activeKind === 'custom' || view.activeKind === UNGROUPED_ID)
           const providerFoldEnabled = !hideHeadings && !view.searching
+          const indentGroups = []
+          const resetIndentGroups = []
 
+          // Finish all visibility writes before reading layout geometry. Mixing
+          // setHidden() and getBoundingClientRect() per provider forces a synchronous
+          // reflow for every provider when the menu opens.
           for (const group of record.catalog.groups) {
             const matches = (group.models ?? []).filter((model) => view.visibleKeys.has(model.key))
             const collapsedProvider =
@@ -4376,13 +4415,18 @@ window.__ModuleLoader__.load({
               group.heading.dataset.dshToolboxHeading =
                 providerFoldEnabled && matches.length > 0 ? 'true' : 'false'
             }
-            if (hideHeadings || sectionHidden) {
-              this.applyRowIndent(record, group, 0)
-            } else {
-              const indent = this.providerIndent(record, group)
-              if (indent !== null) this.applyRowIndent(record, group, indent)
-            }
+            if (hideHeadings || sectionHidden) resetIndentGroups.push(group)
+            else indentGroups.push(group)
           }
+
+          // Read all provider geometry before applying any padding writes. This avoids
+          // layout thrashing while keeping the alignment update synchronous for callers
+          // and keyboard interaction.
+          const measuredIndents = indentGroups.map((group) => [group, this.providerIndent(record, group)])
+          for (const [group, indent] of measuredIndents) {
+            if (indent !== null) this.applyRowIndent(record, group, indent)
+          }
+          for (const group of resetIndentGroups) this.applyRowIndent(record, group, 0)
 
           if (record.nativeSearch) {
             this.focusBeforeHide(record, record.nativeSearch)
@@ -4484,10 +4528,12 @@ window.__ModuleLoader__.load({
             const applied = Number(button.dataset.dshToolboxIndent ?? 0)
             if (applied === indent) continue
             if (!button.hasAttribute('data-dsh-toolbox-indent-base')) {
-              const inline = parseFloat(button.style.paddingLeft)
+              const inlineText = button.style.paddingLeft
+              const inline = parseFloat(inlineText)
               const base = Number.isFinite(inline)
                 ? inline
                 : parseFloat(this.win?.getComputedStyle?.(button)?.paddingLeft ?? '0') || 0
+              button.setAttribute('data-dsh-toolbox-indent-inline', inlineText)
               button.setAttribute('data-dsh-toolbox-indent-base', String(base))
             }
             const base = Number(button.getAttribute('data-dsh-toolbox-indent-base')) || 0
@@ -4719,12 +4765,18 @@ window.__ModuleLoader__.load({
         }
 
         updateConfig(next) {
+          let refreshAfterWrite = true
           try {
             if (typeof this.options.setConfig === 'function') {
               const saved = this.options.setConfig(next)
               this.config = saved ?? next
             } else if (this.storage) {
+              // saveConfig dispatches CONFIG_EVENT synchronously. Publish the next
+              // in-memory value before writing so the synchronous subscriber refresh
+              // renders the new view, then avoid a second full pass below.
+              this.config = next
               this.config = saveConfig(this.storage, next, this.win)
+              refreshAfterWrite = false
             } else {
               this.config = next
             }
@@ -4733,7 +4785,7 @@ window.__ModuleLoader__.load({
             this.config = next
             this.warnOnce('storage', `could not save configuration: ${error instanceof Error ? error.message : String(error)}`)
           }
-          this.refresh()
+          if (refreshAfterWrite) this.refresh()
         }
 
         /** Save the catalog snapshot once per distinct catalog. */
@@ -4741,7 +4793,8 @@ window.__ModuleLoader__.load({
           for (const record of this.records.values()) {
             const models = record.catalog?.models ?? []
             if (models.length === 0) continue
-            const fingerprint = catalogFingerprint(models)
+            const fingerprint = record.catalogFingerprint ?? catalogFingerprint(models)
+            record.catalogFingerprint = fingerprint
             if (fingerprint === this.catalogFingerprint) return
             try {
               if (this.storage) saveCatalog(this.storage, models, this.win)
@@ -4772,8 +4825,9 @@ window.__ModuleLoader__.load({
             heading.removeAttribute('data-dsh-toolbox-provider-id')
           }
           for (const node of record.root?.querySelectorAll?.('[data-dsh-toolbox-indent]') ?? []) {
-            node.style.paddingLeft = ''
+            node.style.paddingLeft = node.getAttribute('data-dsh-toolbox-indent-inline') ?? ''
             node.removeAttribute('data-dsh-toolbox-indent')
+            node.removeAttribute('data-dsh-toolbox-indent-inline')
             node.removeAttribute('data-dsh-toolbox-indent-base')
           }
           for (const node of record.root?.querySelectorAll?.(`[${HIDDEN}]`) ?? []) restoreNode(node)

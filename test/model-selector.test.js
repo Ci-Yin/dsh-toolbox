@@ -318,6 +318,64 @@ test('stop removes every injected node, listener, and hidden attribute', () => {
   assert.equal(controller.records.size, 0)
 })
 
+test('opening a menu performs one initial refresh and ignores unrelated body mutations', () => {
+  class Observer {
+    constructor(callback) {
+      this.callback = callback
+    }
+
+    observe() {}
+    disconnect() {}
+  }
+
+  const { dom, controller } = setup({ controller: { MutationObserver: Observer } })
+  let refreshes = 0
+  const refreshRecord = controller.refreshRecord.bind(controller)
+  controller.refreshRecord = (record) => {
+    refreshes += 1
+    return refreshRecord(record)
+  }
+  controller.start()
+  assert.equal(refreshes, 1)
+
+  const unrelated = dom.window.document.createElement('div')
+  dom.window.document.body.appendChild(unrelated)
+  controller.observer.callback([{
+    target: dom.window.document.body,
+    addedNodes: [unrelated],
+    removedNodes: [],
+  }])
+  assert.equal(controller.scheduled, false)
+
+  const row = dom.window.document.querySelector('button[role="menuitemradio"]')
+  const added = dom.window.document.createElement('span')
+  row.appendChild(added)
+  controller.observer.callback([{
+    target: row,
+    addedNodes: [added],
+    removedNodes: [],
+  }])
+  assert.equal(controller.scheduled, true)
+  controller.stop()
+})
+
+test('configuration updates refresh once and preserve inline row padding on stop', () => {
+  const { dom, controller } = setup()
+  const row = dom.window.document.querySelector('button[role="menuitemradio"]')
+  row.style.paddingLeft = '11px'
+  controller.start()
+  let refreshes = 0
+  const refresh = controller.refresh.bind(controller)
+  controller.refresh = () => {
+    refreshes += 1
+    return refresh()
+  }
+  controller.updateConfig({ ...controller.config })
+  assert.equal(refreshes, 1)
+  controller.stop()
+  assert.equal(row.style.paddingLeft, '11px')
+})
+
 test('closing the menu disposes its enhancement', () => {
   const { dom, controller } = setup()
   controller.start()
