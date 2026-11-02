@@ -372,6 +372,9 @@ test('configuration updates refresh once and preserve inline row padding on stop
   }
   controller.updateConfig({ ...controller.config })
   assert.equal(refreshes, 1)
+  const record = [...controller.records.values()][0]
+  controller.applyRowIndent(record, record.catalog.groups[0], 3)
+  assert.equal(row.style.paddingLeft, '14px')
   controller.stop()
   assert.equal(row.style.paddingLeft, '11px')
 })
