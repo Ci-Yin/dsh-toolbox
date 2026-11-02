@@ -3720,7 +3720,7 @@ window.__ModuleLoader__.load({
        * - When the host structure is unrecognized, leave the native menu untouched.
        */
 
-      const { MODEL_ROW_SELECTOR, catalogFingerprint, detectExternalSearch, findExternalSearchInput, findModelMenus, readExternalQuery, readModelCatalog } = __require("src/model-catalog.js")
+      const { MODEL_LABEL_SELECTOR, MODEL_ROW_SELECTOR, catalogFingerprint, detectExternalSearch, findExternalSearchInput, findModelMenus, readExternalQuery, readModelCatalog } = __require("src/model-catalog.js")
       const { UNGROUPED_ID, VIEW_ALL, VIEW_PROVIDER, buildViewModel, setGroupCollapsed, sortGroups } = __require("src/model-groups.js")
       const { loadCatalog, loadConfig, saveCatalog, saveConfig, subscribeConfig } = __require("src/model-storage.js")
       const { installStyles } = __require("src/styles.js")
@@ -4376,6 +4376,12 @@ window.__ModuleLoader__.load({
               group.heading.dataset.dshToolboxHeading =
                 providerFoldEnabled && matches.length > 0 ? 'true' : 'false'
             }
+            if (hideHeadings || sectionHidden) {
+              this.applyRowIndent(record, group, 0)
+            } else {
+              const indent = this.providerIndent(record, group)
+              if (indent !== null) this.applyRowIndent(record, group, indent)
+            }
           }
 
           if (record.nativeSearch) {
@@ -4434,6 +4440,60 @@ window.__ModuleLoader__.load({
             })
           }
           return { toggle, badge }
+        }
+
+        /**
+         * Measure how far one provider's rows must move to sit under its label.
+         *
+         * The disclosure button lives in the heading's text flow, so the label starts
+         * one button footprint right of the heading's content edge. Subtracting the
+         * indent already applied to the sample row keeps the value stable: it does not
+         * feed its own result back in, and it re-measures after a theme or host change.
+         * Returns null when there is nothing safe to measure (menu closed, provider
+         * collapsed, no visible row).
+         */
+        providerIndent(record, group) {
+          const heading = group.heading
+          if (!heading || !record.menu?.getBoundingClientRect) return null
+          if (record.menu.getBoundingClientRect().width === 0) return null
+          const toggle = directChild(heading, 'dsh-toolbox-group-toggle')
+          const toggleBox = toggle?.getBoundingClientRect?.()
+          if (!toggleBox || toggleBox.width === 0) return null
+          const headingGap = parseFloat(this.win?.getComputedStyle?.(heading)?.columnGap ?? '0') || 0
+          const toggleMargin = parseFloat(this.win?.getComputedStyle?.(toggle)?.marginRight ?? '0') || 0
+          const sample = (group.models ?? []).find((model) => {
+            const button = model.button
+            return button && button.getAttribute?.(HIDDEN) !== 'true' && button.getBoundingClientRect?.().width > 0
+          })
+          const label = sample?.button?.querySelector?.(MODEL_LABEL_SELECTOR)
+          if (!label) return null
+          const applied = Number(sample.button.dataset.dshToolboxIndent ?? 0)
+          const labelLeft = label.getBoundingClientRect().left - applied
+          return Math.round(toggleBox.right + toggleMargin + headingGap - labelLeft)
+        }
+
+        /**
+         * Move every host row of one provider by `indent` pixels without touching its
+         * structure or click handler. Padding (not margin) keeps the row's hover and
+         * focus background full width, so only the text moves.
+         */
+        applyRowIndent(record, group, indent) {
+          for (const model of group.models ?? []) {
+            const button = model.button
+            if (!button?.style) continue
+            const applied = Number(button.dataset.dshToolboxIndent ?? 0)
+            if (applied === indent) continue
+            if (!button.hasAttribute('data-dsh-toolbox-indent-base')) {
+              const inline = parseFloat(button.style.paddingLeft)
+              const base = Number.isFinite(inline)
+                ? inline
+                : parseFloat(this.win?.getComputedStyle?.(button)?.paddingLeft ?? '0') || 0
+              button.setAttribute('data-dsh-toolbox-indent-base', String(base))
+            }
+            const base = Number(button.getAttribute('data-dsh-toolbox-indent-base')) || 0
+            button.style.paddingLeft = `${Math.max(0, base + indent)}px`
+            button.dataset.dshToolboxIndent = String(indent)
+          }
         }
 
         /** Toggle one provider's fold state; used by the heading and its chevron. */
@@ -4710,6 +4770,11 @@ window.__ModuleLoader__.load({
           for (const heading of record.root?.querySelectorAll?.('[data-dsh-toolbox-heading]') ?? []) {
             heading.removeAttribute('data-dsh-toolbox-heading')
             heading.removeAttribute('data-dsh-toolbox-provider-id')
+          }
+          for (const node of record.root?.querySelectorAll?.('[data-dsh-toolbox-indent]') ?? []) {
+            node.style.paddingLeft = ''
+            node.removeAttribute('data-dsh-toolbox-indent')
+            node.removeAttribute('data-dsh-toolbox-indent-base')
           }
           for (const node of record.root?.querySelectorAll?.(`[${HIDDEN}]`) ?? []) restoreNode(node)
           for (const node of record.root?.querySelectorAll?.(`[${ORIGINAL_TABINDEX}]`) ?? []) restoreNode(node)
