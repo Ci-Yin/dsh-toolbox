@@ -37,6 +37,8 @@ const IdentityRule = z.object({
       }),
     )
     .default([]),
+  /** Inline Responses history across Azure resources; preserve tool call associations. */
+  stripResponsesItemIds: z.boolean().default(false),
   note: z.string().default(''),
 })
 

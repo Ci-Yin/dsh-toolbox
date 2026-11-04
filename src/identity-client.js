@@ -88,6 +88,7 @@ export function normalizeIdentityValue(value) {
                 value: String(header?.value ?? ''),
               }))
             : [],
+          stripResponsesItemIds: rule?.stripResponsesItemIds === true,
           note: String(rule?.note ?? ''),
         }))
       : [],
@@ -104,6 +105,7 @@ export function draftToRule(draft, rules = [], editingId = null) {
     userAgent: draft?.userAgent ?? '',
     note: draft?.note ?? '',
     headers: draft?.headers ?? [],
+    stripResponsesItemIds: draft?.stripResponsesItemIds === true,
   })
 }
 
@@ -284,6 +286,7 @@ export function createIdentitySection(React) {
         userAgent: seed.userAgent ?? '',
         note: seed.note ?? '',
         headers: [],
+        stripResponsesItemIds: seed.stripResponsesItemIds === true,
       })
     }
 
@@ -295,6 +298,7 @@ export function createIdentitySection(React) {
         userAgent: rule.userAgent,
         note: rule.note,
         headers: rule.headers.map((header) => ({ ...header })),
+        stripResponsesItemIds: rule.stripResponsesItemIds === true,
       })
     }
 
@@ -374,6 +378,9 @@ export function createIdentitySection(React) {
             rule.userAgent.length > 0 ? rule.userAgent : t('identity.hostUserAgent'),
           ),
           h('span', { className: 'dsh-toolbox-identity-meta' }, matchText),
+          Number.isFinite(hits?.strippedItems) && hits.strippedItems > 0
+            ? h('span', { className: 'dsh-toolbox-identity-meta' }, t('identity.strippedItems', { count: hits.strippedItems }))
+            : null,
           rule.note.length > 0 ? h('span', { className: 'dsh-toolbox-muted' }, rule.note) : null,
         ),
         h(
@@ -567,6 +574,23 @@ export function createIdentitySection(React) {
                     t('identity.reservedHeader', { names: reservedDraftHeaders.join(', ') }),
                   )
                 : null,
+            ),
+            h(
+              'div',
+              { className: 'dsh-toolbox-identity-field' },
+              h(
+                'label',
+                { className: 'dsh-toolbox-row' },
+                h('input', {
+                  type: 'checkbox',
+                  name: 'stripResponsesItemIds',
+                  checked: draft.stripResponsesItemIds,
+                  disabled: busy || !snapshot.writable,
+                  onChange: (event) => setDraft({ ...draft, stripResponsesItemIds: event.target.checked === true }),
+                }),
+                h('span', { className: 'dsh-toolbox-identity-label' }, t('identity.field.stripItemIds')),
+              ),
+              h('span', { className: 'dsh-toolbox-identity-hint' }, t('identity.field.stripItemIdsHint')),
             ),
             h(
               'div',

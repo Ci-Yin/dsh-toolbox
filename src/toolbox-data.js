@@ -40,7 +40,7 @@ const LOCAL_KEYS = new Set(['modelConfig', 'catalog', 'workspace', 'settings', '
 const WORKSPACE_KEYS = new Set(['lastGroupedView'])
 const SETTINGS_KEYS = new Set(['tab'])
 const IDENTITY_KEYS = new Set(['enabled', 'diagnostics', 'rules'])
-const RULE_KEYS = new Set(['id', 'enabled', 'urlPattern', 'userAgent', 'headers', 'note'])
+const RULE_KEYS = new Set(['id', 'enabled', 'urlPattern', 'userAgent', 'headers', 'stripResponsesItemIds', 'note'])
 const HEADER_KEYS = new Set(['name', 'value'])
 
 export class ToolboxDataError extends Error {
@@ -92,6 +92,11 @@ function normalizeIdentityPayload(raw) {
     if (typeof rule.id !== 'string' || typeof rule.enabled !== 'boolean' || typeof rule.urlPattern !== 'string' ||
         typeof rule.userAgent !== 'string' || typeof rule.note !== 'string') {
       throw new ToolboxDataError('invalid-type', 'Expected typed identity rule fields', path)
+    }
+    // Older v1 exports omit this opt-in field; explicit values must be boolean
+    // so importing a backup never silently changes an enabled rule.
+    if (rule.stripResponsesItemIds !== undefined && typeof rule.stripResponsesItemIds !== 'boolean') {
+      throw new ToolboxDataError('invalid-type', 'Expected a boolean item-id stripping flag', `${path}.stripResponsesItemIds`)
     }
     if (!Array.isArray(rule.headers)) throw new ToolboxDataError('invalid-type', 'Expected an array of headers', `${path}.headers`)
     for (const [headerIndex, header] of rule.headers.entries()) {

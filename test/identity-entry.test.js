@@ -43,6 +43,30 @@ test('the plugin entry declares the default identity document', () => {
   assert.deepEqual(config.identity.get(), { enabled: true, diagnostics: false, rules: [] })
 })
 
+test('the plugin schema defaults item-id stripping off and retains explicit boolean choices', () => {
+  const config = Config({
+    identity: {
+      rules: [
+        { id: 'default', urlPattern: 'default.example' },
+        { id: 'on', urlPattern: 'on.example', stripResponsesItemIds: true },
+        { id: 'off', urlPattern: 'off.example', stripResponsesItemIds: false },
+      ],
+    },
+  })
+  assert.deepEqual(config.identity.get().rules.map((rule) => rule.stripResponsesItemIds), [false, true, false])
+  assert.deepEqual(config.identity.get().rules[0], {
+    id: 'default', enabled: true, urlPattern: 'default.example', userAgent: '', headers: [], stripResponsesItemIds: false, note: '',
+  })
+})
+
+test('the plugin schema rejects truthy strings and numbers for item-id stripping', () => {
+  for (const stripResponsesItemIds of ['true', 'false', 1, 0]) {
+    assert.throws(() => Config({
+      identity: { rules: [{ id: 'rule', urlPattern: 'example.com', stripResponsesItemIds }] },
+    }))
+  }
+})
+
 test('apply installs one wrapper and both routes, and dispose restores fetch', async () => {
   const native = globalThis.fetch
   const calls = []

@@ -41,6 +41,7 @@ const IDENTITY = {
       urlPattern: 'agentrouter.org',
       userAgent: 'claude-cli/1.0.60',
       headers: [{ name: 'x-client', value: 'toolbox-test' }],
+      stripResponsesItemIds: true,
       note: 'test rule',
     },
   ],
@@ -182,6 +183,33 @@ test('full envelope export and import round-trip every owned value', async () =>
     exportedAt: '2026-10-29T10:00:00.000Z',
   })
   assert.equal(roundTrip, text)
+})
+
+test('full-data imports preserve boolean item-id flags and default older backups to false', () => {
+  for (const flag of [undefined, false, true]) {
+    const envelope = makeEnvelope()
+    if (flag === undefined) delete envelope.identity.rules[0].stripResponsesItemIds
+    else envelope.identity.rules[0].stripResponsesItemIds = flag
+    const parsed = parseFullDataText(JSON.stringify(envelope))
+    assert.equal(parsed.identity.rules[0].stripResponsesItemIds, flag === true)
+  }
+})
+
+test('full-data imports reject non-boolean item-id flags before any write', async () => {
+  const storage = new FakeStorage()
+  const before = readLocalSnapshot(storage)
+  const identityApi = makeIdentityApi()
+  for (const flag of ['true', 'false', 1, 0, null, {}, []]) {
+    const envelope = makeEnvelope()
+    envelope.identity.rules[0].stripResponsesItemIds = flag
+    await assert.rejects(
+      importToolboxData(storage, JSON.stringify(envelope), { identityApi }),
+      (error) => error.code === 'invalid-type' && error.path === 'identity.rules[0].stripResponsesItemIds',
+    )
+  }
+  assert.deepEqual(readLocalSnapshot(storage), before)
+  assert.equal(identityApi.reads.length, 0)
+  assert.equal(identityApi.saves.length, 0)
 })
 
 test('legacy model-only imports leave catalog, workspace, settings, and host identity untouched', async () => {

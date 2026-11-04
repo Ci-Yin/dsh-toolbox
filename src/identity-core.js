@@ -42,6 +42,43 @@ export const IDENTITY_LIMITS = Object.freeze({
   testBodyBytes: 8192,
 })
 
+/** Maximum JSON request body size eligible for Responses item-id rewriting. */
+export const BODY_LIMITS = Object.freeze({ maxJsonBodyBytes: 8 * 1024 * 1024 })
+
+/**
+ * Strip only input items' own top-level ids, leaving references and all content
+ * intact. A no-op returns the original text, including its whitespace.
+ *
+ * @param {string} raw
+ * @returns {{ text: string, stripped: number, skipped: number }}
+ */
+export function stripResponsesItemIds(raw) {
+  const unchanged = { text: raw, stripped: 0, skipped: 0 }
+  if (typeof raw !== 'string' || raw.length === 0) return unchanged
+  let body
+  try {
+    body = JSON.parse(raw)
+  } catch {
+    return unchanged
+  }
+  if (body === null || typeof body !== 'object' || !Array.isArray(body.input)) return unchanged
+
+  let stripped = 0
+  let skipped = 0
+  const input = body.input.map((item) => {
+    if (item === null || typeof item !== 'object' || !Object.hasOwn(item, 'id')) return item
+    if (item.type === 'item_reference') {
+      skipped += 1
+      return item
+    }
+    const { id: _id, ...rest } = item
+    stripped += 1
+    return rest
+  })
+  if (stripped === 0) return { text: raw, stripped: 0, skipped }
+  return { text: JSON.stringify({ ...body, input }), stripped, skipped }
+}
+
 /** RFC 7230 token: the only shape an HTTP header name may take. */
 const HEADER_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/u
 
@@ -171,6 +208,7 @@ export function sanitizeRule(input, index = 0) {
       urlPattern,
       userAgent,
       headers,
+      stripResponsesItemIds: source.stripResponsesItemIds === true,
       note,
     },
     errors: errors.map((error) => ({ ...error, rule: index })),
@@ -290,9 +328,9 @@ export function isRewritableUrl(url) {
 /**
  * Bounded, content-free hit accounting for the settings card.
  *
- * Only the rule id, the request URL, and the `user-agent` pair are kept. No
- * other header is ever retained, so a credential header can never leak through
- * this structure (FR-10).
+ * Only the rule id, request URL, `user-agent` pair, and stripped-item count are
+ * kept. No body or other header is ever retained, so request content and
+ * credential headers cannot leak through this structure (FR-10).
  */
 export function createIdentityStats(options = {}) {
   const maxUrls = options.maxUrls ?? 3
@@ -301,8 +339,9 @@ export function createIdentityStats(options = {}) {
   let last = null
 
   return {
-    record(ruleId, url, beforeUserAgent, afterUserAgent, at = Date.now()) {
+    record(ruleId, url, beforeUserAgent, afterUserAgent, at = Date.now(), extra = {}) {
       if (typeof ruleId !== 'string' || ruleId.length === 0) return
+      const strippedItems = Number.isFinite(extra?.strippedItems) ? Math.max(0, extra.strippedItems) : 0
       const host = hostFromPattern(url) || ''
       let entry = records.get(ruleId)
       if (entry === undefined) {
@@ -310,10 +349,11 @@ export function createIdentityStats(options = {}) {
           const oldest = records.keys().next()
           if (!oldest.done) records.delete(oldest.value)
         }
-        entry = { count: 0, lastAt: 0, hosts: [] }
+        entry = { count: 0, lastAt: 0, hosts: [], strippedItems: 0 }
         records.set(ruleId, entry)
       }
       entry.count += 1
+      entry.strippedItems += strippedItems
       entry.lastAt = at
       if (!entry.hosts.includes(host)) {
         entry.hosts.push(host)
@@ -326,12 +366,13 @@ export function createIdentityStats(options = {}) {
         beforeUserAgent: text(beforeUserAgent),
         afterUserAgent: text(afterUserAgent),
         at,
+        strippedItems,
       }
     },
     snapshot() {
       const out = {}
       for (const [id, entry] of records) {
-        out[id] = { count: entry.count, lastAt: entry.lastAt, hosts: [...entry.hosts] }
+        out[id] = { count: entry.count, lastAt: entry.lastAt, hosts: [...entry.hosts], strippedItems: entry.strippedItems }
       }
       return out
     },

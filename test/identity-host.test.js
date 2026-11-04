@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createIdentityStats } from '../src/identity-core.js'
+import { createIdentityStats, sanitizeIdentityConfig } from '../src/identity-core.js'
 import {
   IDENTITY_ENTRY_ID,
   IDENTITY_ROUTE,
@@ -193,10 +193,97 @@ test('saving validates, normalizes, drops reserved headers, and persists once', 
   assert.equal(body.value.diagnostics, true)
   assert.equal(body.value.rules[0].urlPattern, 'agentrouter.org')
   assert.deepEqual(body.value.rules[0].headers, [{ name: 'x-app', value: 'cli' }])
+  assert.equal(body.value.rules[0].stripResponsesItemIds, false)
   assert.equal(settings.calls.length, 1)
   assert.equal(settings.calls[0].ns, IDENTITY_ENTRY_ID)
   assert.equal(settings.calls[0].expected, 1)
   assert.deepEqual(settings.state(), { identity: body.value })
+})
+
+test('sanitizeIdentityConfig round-trips literal boolean stripping flags and defaults other values to false', () => {
+  const cases = [
+    { id: 'default', expected: false },
+    { id: 'on', value: true, expected: true },
+    { id: 'off', value: false, expected: false },
+    { id: 'string', value: 'true', expected: false },
+    { id: 'number', value: 1, expected: false },
+    { id: 'null', value: null, expected: false },
+  ]
+  const raw = {
+    rules: cases.map(({ id, value }) => ({
+      id,
+      urlPattern: `${id}.example`,
+      ...(value === undefined ? {} : { stripResponsesItemIds: value }),
+    })),
+  }
+  const result = sanitizeIdentityConfig(raw)
+  assert.deepEqual(result.errors, [])
+  assert.deepEqual(result.droppedHeaders, [])
+  assert.deepEqual(result.value.rules.map((rule) => rule.stripResponsesItemIds), cases.map(({ expected }) => expected))
+  assert.deepEqual(sanitizeIdentityConfig(JSON.parse(JSON.stringify(result.value))), result)
+  assert.equal(Object.hasOwn(raw.rules[0], 'stripResponsesItemIds'), false)
+  assert.equal(raw.rules[3].stripResponsesItemIds, 'true')
+})
+
+test('the config route persists and reads back strict boolean stripping flags, including disabling a saved rule', async () => {
+  const settings = fakeSettings()
+  const handlers = handlersWith(settings)
+  const res = makeRes()
+  await handlers.config(makeReq({
+    method: 'POST',
+    body: {
+      expectedRevision: 1,
+      value: {
+        rules: [
+          { id: 'on', urlPattern: 'on.example', stripResponsesItemIds: true },
+          { id: 'default', urlPattern: 'default.example' },
+          { id: 'string', urlPattern: 'string.example', stripResponsesItemIds: 'true' },
+          { id: 'off', urlPattern: 'off.example', stripResponsesItemIds: false },
+        ],
+      },
+    },
+  }), res)
+
+  assert.equal(res.status, 200)
+  const saved = JSON.parse(res.body)
+  assert.equal(saved.revision, 2)
+  assert.deepEqual(saved.value.rules.map((rule) => rule.stripResponsesItemIds), [true, false, false, false])
+  assert.deepEqual(settings.calls[0].section, { identity: saved.value })
+  const readBack = makeRes()
+  await handlers.config(makeReq(), readBack)
+  assert.equal(readBack.status, 200)
+  assert.deepEqual(JSON.parse(readBack.body).value, saved.value)
+
+  const disabled = makeRes()
+  saved.value.rules[0].stripResponsesItemIds = false
+  await handlers.config(makeReq({ method: 'POST', body: { expectedRevision: 2, value: saved.value } }), disabled)
+  assert.equal(disabled.status, 200)
+  assert.equal(JSON.parse(disabled.body).value.rules[0].stripResponsesItemIds, false)
+  const readDisabled = makeRes()
+  await handlers.config(makeReq(), readDisabled)
+  assert.equal(readDisabled.status, 200)
+  assert.equal(JSON.parse(readDisabled.body).value.rules[0].stripResponsesItemIds, false)
+  assert.equal(settings.calls.length, 2)
+})
+
+test('the config route exposes cumulative stripped counts without leaking extra request content', async () => {
+  const stats = createIdentityStats()
+  const secret = 'private-body-content'
+  stats.record('agentrouter', 'https://agentrouter.org/v1/responses', 'dsh', 'cli', 100, {
+    strippedItems: 3,
+    text: secret,
+    body: { input: [{ id: 'msg_private', content: secret }] },
+  })
+  stats.record('agentrouter', 'https://agentrouter.org/v1/responses', 'dsh', 'cli', 200, { strippedItems: 2 })
+  const handlers = handlersWith(fakeSettings(), { stats })
+  const res = makeRes()
+  await handlers.config(makeReq(), res)
+  assert.equal(res.status, 200)
+  assert.deepEqual(JSON.parse(res.body).stats, {
+    agentrouter: { count: 2, lastAt: 200, hosts: ['agentrouter.org'], strippedItems: 5 },
+  })
+  assert.equal(res.body.includes(secret), false)
+  assert.equal(res.body.includes('msg_private'), false)
 })
 
 test('saving rejects an invalid rule and a stale revision', async () => {

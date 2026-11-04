@@ -58,6 +58,43 @@ window.__ModuleLoader__.load({
         testBodyBytes: 8192,
       })
 
+      /** Maximum JSON request body size eligible for Responses item-id rewriting. */
+      const BODY_LIMITS = Object.freeze({ maxJsonBodyBytes: 8 * 1024 * 1024 })
+
+      /**
+       * Strip only input items' own top-level ids, leaving references and all content
+       * intact. A no-op returns the original text, including its whitespace.
+       *
+       * @param {string} raw
+       * @returns {{ text: string, stripped: number, skipped: number }}
+       */
+      function stripResponsesItemIds(raw) {
+        const unchanged = { text: raw, stripped: 0, skipped: 0 }
+        if (typeof raw !== 'string' || raw.length === 0) return unchanged
+        let body
+        try {
+          body = JSON.parse(raw)
+        } catch {
+          return unchanged
+        }
+        if (body === null || typeof body !== 'object' || !Array.isArray(body.input)) return unchanged
+
+        let stripped = 0
+        let skipped = 0
+        const input = body.input.map((item) => {
+          if (item === null || typeof item !== 'object' || !Object.hasOwn(item, 'id')) return item
+          if (item.type === 'item_reference') {
+            skipped += 1
+            return item
+          }
+          const { id: _id, ...rest } = item
+          stripped += 1
+          return rest
+        })
+        if (stripped === 0) return { text: raw, stripped: 0, skipped }
+        return { text: JSON.stringify({ ...body, input }), stripped, skipped }
+      }
+
       /** RFC 7230 token: the only shape an HTTP header name may take. */
       const HEADER_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/u
 
@@ -187,6 +224,7 @@ window.__ModuleLoader__.load({
             urlPattern,
             userAgent,
             headers,
+            stripResponsesItemIds: source.stripResponsesItemIds === true,
             note,
           },
           errors: errors.map((error) => ({ ...error, rule: index })),
@@ -306,9 +344,9 @@ window.__ModuleLoader__.load({
       /**
        * Bounded, content-free hit accounting for the settings card.
        *
-       * Only the rule id, the request URL, and the `user-agent` pair are kept. No
-       * other header is ever retained, so a credential header can never leak through
-       * this structure (FR-10).
+       * Only the rule id, request URL, `user-agent` pair, and stripped-item count are
+       * kept. No body or other header is ever retained, so request content and
+       * credential headers cannot leak through this structure (FR-10).
        */
       function createIdentityStats(options = {}) {
         const maxUrls = options.maxUrls ?? 3
@@ -317,8 +355,9 @@ window.__ModuleLoader__.load({
         let last = null
 
         return {
-          record(ruleId, url, beforeUserAgent, afterUserAgent, at = Date.now()) {
+          record(ruleId, url, beforeUserAgent, afterUserAgent, at = Date.now(), extra = {}) {
             if (typeof ruleId !== 'string' || ruleId.length === 0) return
+            const strippedItems = Number.isFinite(extra?.strippedItems) ? Math.max(0, extra.strippedItems) : 0
             const host = hostFromPattern(url) || ''
             let entry = records.get(ruleId)
             if (entry === undefined) {
@@ -326,10 +365,11 @@ window.__ModuleLoader__.load({
                 const oldest = records.keys().next()
                 if (!oldest.done) records.delete(oldest.value)
               }
-              entry = { count: 0, lastAt: 0, hosts: [] }
+              entry = { count: 0, lastAt: 0, hosts: [], strippedItems: 0 }
               records.set(ruleId, entry)
             }
             entry.count += 1
+            entry.strippedItems += strippedItems
             entry.lastAt = at
             if (!entry.hosts.includes(host)) {
               entry.hosts.push(host)
@@ -342,12 +382,13 @@ window.__ModuleLoader__.load({
               beforeUserAgent: text(beforeUserAgent),
               afterUserAgent: text(afterUserAgent),
               at,
+              strippedItems,
             }
           },
           snapshot() {
             const out = {}
             for (const [id, entry] of records) {
-              out[id] = { count: entry.count, lastAt: entry.lastAt, hosts: [...entry.hosts] }
+              out[id] = { count: entry.count, lastAt: entry.lastAt, hosts: [...entry.hosts], strippedItems: entry.strippedItems }
             }
             return out
           },
@@ -364,7 +405,7 @@ window.__ModuleLoader__.load({
           },
         }
       }
-      return { emptyIdentityConfig, normalizeUrlPattern, normalizeHeaderName, isReservedHeader, isValidHeaderName, suggestRuleId, normalizeRuleId, sanitizeRule, sanitizeIdentityConfig, matchRule, applicableHeaders, hostFromPattern, modelsUrlFor, isRewritableUrl, createIdentityStats, RESERVED_HEADERS, IDENTITY_LIMITS }
+      return { stripResponsesItemIds, emptyIdentityConfig, normalizeUrlPattern, normalizeHeaderName, isReservedHeader, isValidHeaderName, suggestRuleId, normalizeRuleId, sanitizeRule, sanitizeIdentityConfig, matchRule, applicableHeaders, hostFromPattern, modelsUrlFor, isRewritableUrl, createIdentityStats, RESERVED_HEADERS, IDENTITY_LIMITS, BODY_LIMITS }
     }
     __defs["src/identity-client.js"] = () => {
       /**
@@ -449,6 +490,7 @@ window.__ModuleLoader__.load({
                       value: String(header?.value ?? ''),
                     }))
                   : [],
+                stripResponsesItemIds: rule?.stripResponsesItemIds === true,
                 note: String(rule?.note ?? ''),
               }))
             : [],
@@ -465,6 +507,7 @@ window.__ModuleLoader__.load({
           userAgent: draft?.userAgent ?? '',
           note: draft?.note ?? '',
           headers: draft?.headers ?? [],
+          stripResponsesItemIds: draft?.stripResponsesItemIds === true,
         })
       }
 
@@ -645,6 +688,7 @@ window.__ModuleLoader__.load({
               userAgent: seed.userAgent ?? '',
               note: seed.note ?? '',
               headers: [],
+              stripResponsesItemIds: seed.stripResponsesItemIds === true,
             })
           }
 
@@ -656,6 +700,7 @@ window.__ModuleLoader__.load({
               userAgent: rule.userAgent,
               note: rule.note,
               headers: rule.headers.map((header) => ({ ...header })),
+              stripResponsesItemIds: rule.stripResponsesItemIds === true,
             })
           }
 
@@ -735,6 +780,9 @@ window.__ModuleLoader__.load({
                   rule.userAgent.length > 0 ? rule.userAgent : t('identity.hostUserAgent'),
                 ),
                 h('span', { className: 'dsh-toolbox-identity-meta' }, matchText),
+                Number.isFinite(hits?.strippedItems) && hits.strippedItems > 0
+                  ? h('span', { className: 'dsh-toolbox-identity-meta' }, t('identity.strippedItems', { count: hits.strippedItems }))
+                  : null,
                 rule.note.length > 0 ? h('span', { className: 'dsh-toolbox-muted' }, rule.note) : null,
               ),
               h(
@@ -928,6 +976,23 @@ window.__ModuleLoader__.load({
                           t('identity.reservedHeader', { names: reservedDraftHeaders.join(', ') }),
                         )
                       : null,
+                  ),
+                  h(
+                    'div',
+                    { className: 'dsh-toolbox-identity-field' },
+                    h(
+                      'label',
+                      { className: 'dsh-toolbox-row' },
+                      h('input', {
+                        type: 'checkbox',
+                        name: 'stripResponsesItemIds',
+                        checked: draft.stripResponsesItemIds,
+                        disabled: busy || !snapshot.writable,
+                        onChange: (event) => setDraft({ ...draft, stripResponsesItemIds: event.target.checked === true }),
+                      }),
+                      h('span', { className: 'dsh-toolbox-identity-label' }, t('identity.field.stripItemIds')),
+                    ),
+                    h('span', { className: 'dsh-toolbox-identity-hint' }, t('identity.field.stripItemIdsHint')),
                   ),
                   h(
                     'div',
@@ -2656,6 +2721,7 @@ window.__ModuleLoader__.load({
         'identity.diagnosticsHint': '仅在命中时记录规则、host 与改写前后的 UA，不记录任何请求头值。',
         'identity.enable': '启用身份改写',
         'identity.hits': '已命中 {count} 次 · {hosts}',
+        'identity.strippedItems': '已剥离 {count} 个 Responses 条目 id',
         'identity.noHits': '尚未命中',
         'identity.hostUserAgent': '宿主 UA（未指定）',
         'identity.enableRule': '启用',
@@ -2675,6 +2741,8 @@ window.__ModuleLoader__.load({
         'identity.field.headers': '自定义请求头',
         'identity.field.noHeaders': '没有自定义请求头',
         'identity.field.addHeader': '添加请求头',
+        'identity.field.stripItemIds': '剥离 Responses 条目 id',
+        'identity.field.stripItemIdsHint': '多资源 Azure 网关在多轮对话报 400 时开启；会移除历史条目的 id，保留工具调用关联',
         'identity.error.settingsAbsent': '宿主的设置服务不可用，无法保存身份规则。',
         'identity.error.namespaceMissing': '宿主没有加载本插件的身份配置项。重启 DSH 后重试。',
         'identity.error.routeMissing': '宿主没有注册身份改写接口（插件宿主半侧未加载）。重启 DSH 后重试。',
@@ -2831,6 +2899,7 @@ window.__ModuleLoader__.load({
         'identity.diagnosticsHint': 'On a match, logs the rule, host, and both user-agents. Never logs any header value.',
         'identity.enable': 'Enable identity rewrite',
         'identity.hits': 'matched {count} times · {hosts}',
+        'identity.strippedItems': 'Stripped {count} Responses item IDs',
         'identity.noHits': 'No match yet',
         'identity.hostUserAgent': 'Host UA (unchanged)',
         'identity.enableRule': 'Enable',
@@ -2850,6 +2919,8 @@ window.__ModuleLoader__.load({
         'identity.field.headers': 'Custom headers',
         'identity.field.noHeaders': 'No custom headers',
         'identity.field.addHeader': 'Add header',
+        'identity.field.stripItemIds': 'Strip Responses item IDs',
+        'identity.field.stripItemIdsHint': 'Enable when a multi-resource Azure gateway returns 400 in multi-turn conversations. Removes historical item IDs while preserving tool-call associations.',
         'identity.error.settingsAbsent': 'The host settings service is unavailable, so identity rules cannot be saved.',
         'identity.error.namespaceMissing': 'The host has not loaded this plugin’s identity configuration entry. Restart DSH and try again.',
         'identity.error.routeMissing': 'The host has not registered the identity route (the host half is not loaded). Restart DSH and try again.',
@@ -5427,7 +5498,7 @@ window.__ModuleLoader__.load({
       const WORKSPACE_KEYS = new Set(['lastGroupedView'])
       const SETTINGS_KEYS = new Set(['tab'])
       const IDENTITY_KEYS = new Set(['enabled', 'diagnostics', 'rules'])
-      const RULE_KEYS = new Set(['id', 'enabled', 'urlPattern', 'userAgent', 'headers', 'note'])
+      const RULE_KEYS = new Set(['id', 'enabled', 'urlPattern', 'userAgent', 'headers', 'stripResponsesItemIds', 'note'])
       const HEADER_KEYS = new Set(['name', 'value'])
 
       class ToolboxDataError extends Error {
@@ -5479,6 +5550,11 @@ window.__ModuleLoader__.load({
           if (typeof rule.id !== 'string' || typeof rule.enabled !== 'boolean' || typeof rule.urlPattern !== 'string' ||
               typeof rule.userAgent !== 'string' || typeof rule.note !== 'string') {
             throw new ToolboxDataError('invalid-type', 'Expected typed identity rule fields', path)
+          }
+          // Older v1 exports omit this opt-in field; explicit values must be boolean
+          // so importing a backup never silently changes an enabled rule.
+          if (rule.stripResponsesItemIds !== undefined && typeof rule.stripResponsesItemIds !== 'boolean') {
+            throw new ToolboxDataError('invalid-type', 'Expected a boolean item-id stripping flag', `${path}.stripResponsesItemIds`)
           }
           if (!Array.isArray(rule.headers)) throw new ToolboxDataError('invalid-type', 'Expected an array of headers', `${path}.headers`)
           for (const [headerIndex, header] of rule.headers.entries()) {
